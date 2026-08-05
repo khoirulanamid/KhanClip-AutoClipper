@@ -30,8 +30,8 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [steps, setSteps] = useState<StepItem[]>([
     { id: 'audio', name: '1. Ekstraksi Audio PCM & VAD Wicara', status: 'pending', detail: 'Membaca track audio lokal' },
-    { id: 'whisper', name: '2. Transkripsi Wicara Lokal', status: 'pending', detail: 'Membuat timestamp per kata' },
-    { id: 'highlight', name: '3. Scoring & Pembuatan Kandidat', status: 'pending', detail: 'Mencari kalimat pembuka & hook' },
+    { id: 'whisper', name: '2. Pengenal Suara Wicara Asli (Speech-to-Text)', status: 'pending', detail: 'Menerjemahkan ucapan suara video' },
+    { id: 'highlight', name: '3. Scoring & Pembuatan Kandidat Ilmu', status: 'pending', detail: 'Mencari kalimat pembuka & hook' },
     { id: 'vision', name: '4. Frame Sampling & Deteksi Wajah', status: 'pending', detail: 'Mengambil sampel frame dari video asli' },
     { id: 'layout', name: '5. Smart Crop 9:16 & Layouting', status: 'pending', detail: 'Menyusun posisi teks & crop window' },
   ]);
@@ -66,19 +66,19 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
 
         if (!isMounted) return;
 
-        // Step 2: Real Local Speech Transcription
-        updateStepStatus('whisper', 'in_progress', 'Memproses transkripsi wicara lokal...');
-        const transRes = await transcribeAudioSegments('proj-01', settings.language, audioRes.value.speechSegments);
+        // Step 2: Real Local Speech Recognition (Speech-to-Text)
+        updateStepStatus('whisper', 'in_progress', 'Menerjemahkan suara wicara video asli...');
+        const transRes = await transcribeAudioSegments('proj-01', settings.language, audioRes.value.speechSegments, targetFile);
         if (!transRes.success) {
           throw new Error(transRes.error.message);
         }
-        updateStepStatus('whisper', 'completed', `Transkripsi selesai: ${transRes.value.segments.length} kalimat bertimestamp`);
+        updateStepStatus('whisper', 'completed', `Transkripsi ucapan selesai: ${transRes.value.segments.length} segmen suara terdeteksi`);
         setOverallProgress(50);
 
         if (!isMounted) return;
 
         // Step 3: Real Candidate Generation & Quality Scoring
-        updateStepStatus('highlight', 'in_progress', 'Menghitung Skor Kualitas Kandidat...');
+        updateStepStatus('highlight', 'in_progress', 'Menhitung Skor Kualitas & Poin Ilmu...');
         const candidates = generateCandidatesFromTranscript('proj-01', transRes.value, settings);
         updateStepStatus('highlight', 'completed', `Dihasilkan ${candidates.length} kandidat clip berkualitas`);
         setOverallProgress(70);
