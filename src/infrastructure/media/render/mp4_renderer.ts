@@ -8,12 +8,13 @@ import {
   secondsToUs,
 } from '@/domain/transcript/subtitle';
 import { TranscriptWord } from '@/domain/transcript/types';
+import { renderCanvasOverlays, SubtitlePresetStyle } from '@/domain/render/canvas_overlay';
 
 export type RenderProgressCallback = (percent: number, stage: string) => void;
 
 /**
  * 9:16 MP4 Canvas Video Renderer.
- * Uses shared getActiveSubtitleCue function for 100% preview and render parity.
+ * Uses shared renderCanvasOverlays function for 100% preview and render typography parity.
  */
 export async function renderCandidateToMp4(
   job: RenderJob,
@@ -74,6 +75,8 @@ export async function renderCandidateToMp4(
 
     recorder.start();
 
+    const presetStyle: SubtitlePresetStyle = 'kinetic';
+
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       const frameTimeSec = frameIndex / fps;
       const frameLocalTimeUs = secondsToUs(frameTimeSec);
@@ -85,45 +88,20 @@ export async function renderCandidateToMp4(
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Headline Teaser Overlay
-      ctx.fillStyle = '#6366f1';
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      ctx.roundRect(canvas.width * 0.08, canvas.height * 0.12, canvas.width * 0.84, 120, 20);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = "bold 38px 'Outfit', sans-serif";
-      ctx.textAlign = 'center';
-      ctx.fillText(candidate.headline, canvas.width / 2, canvas.height * 0.12 + 74);
-
-      // Render Subtitle Overlay using shared getActiveSubtitleCue
+      // Active Subtitle Cue Resolution
       const activeCue = getActiveSubtitleCue(frameLocalTimeUs, subtitleTrack.cues);
       const activeWord = activeCue ? getActiveWord(frameLocalTimeUs, activeCue) : null;
 
-      if (activeCue) {
-        const boxWidth = canvas.width * 0.88;
-        const boxX = (canvas.width - boxWidth) / 2;
-        const boxY = canvas.height * 0.74;
-
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-        ctx.beginPath();
-        ctx.roundRect(boxX, boxY, boxWidth, 160, 24);
-        ctx.fill();
-
-        ctx.font = "bold 34px 'Inter', sans-serif";
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#e2e8f0';
-        ctx.fillText(activeCue.text, canvas.width / 2, boxY + 68);
-
-        if (activeWord) {
-          ctx.fillStyle = '#fbbf24';
-          ctx.font = "bold 40px 'Outfit', sans-serif";
-          ctx.fillText(`👉  ${activeWord.text.toUpperCase()}  👈`, canvas.width / 2, boxY + 124);
-        }
-      }
+      // Professional Canvas Overlay Renderer (100% parity with Preview Editor)
+      renderCanvasOverlays({
+        canvas,
+        ctx,
+        headlineText: candidate.headline,
+        activeCue,
+        activeWord,
+        presetStyle,
+        showSafeArea: false,
+      });
 
       if (onProgress) {
         onProgress(Math.round((frameIndex / totalFrames) * 100), 'compositing');

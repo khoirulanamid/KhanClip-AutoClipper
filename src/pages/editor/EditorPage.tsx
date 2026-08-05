@@ -8,6 +8,7 @@ import {
   secondsToUs,
 } from '@/domain/transcript/subtitle';
 import { TranscriptWord, SubtitleTrack } from '@/domain/transcript/types';
+import { renderCanvasOverlays, SubtitlePresetStyle } from '@/domain/render/canvas_overlay';
 
 interface EditorPageProps {
   selectedFile: File | null;
@@ -32,7 +33,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
   const [headline, setHeadline] = useState(currentCandidate?.headline || '');
   const [subtitleText, setSubtitleText] = useState(currentCandidate?.transcriptText || '');
-  const [subtitleStyle, setSubtitleStyle] = useState<'kinetic' | 'minimal' | 'bold_banner'>('kinetic');
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitlePresetStyle>('kinetic');
   const [layout, setLayout] = useState(currentCandidate?.selectedLayout || 'smart_editorial');
   const [showSafeArea, setShowSafeArea] = useState(true);
   const [startUs, setStartUs] = useState(currentCandidate?.startUs || 0);
@@ -149,7 +150,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     }
   };
 
-  // Synchronize 9:16 Canvas rendering using shared getActiveSubtitleCue function (NO debug timestamps)
+  // Synchronize 9:16 Canvas rendering using professional renderCanvasOverlays Helper
   useEffect(() => {
     let animId: number;
     const video = videoRef.current;
@@ -185,62 +186,27 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         const sourceTimeUs = secondsToUs(video.currentTime);
         const localTimeUs = Math.max(0, sourceTimeUs - startUs);
 
-        // Resolve active subtitle cue via shared getActiveSubtitleCue (STRICTLY NO timestamp strings in canvas)
+        // Resolve active subtitle cue via shared getActiveSubtitleCue
         const activeCue = getActiveSubtitleCue(localTimeUs, subtitleTrack.cues);
         const activeWord = activeCue ? getActiveWord(localTimeUs, activeCue) : null;
 
-        const boxWidth = canvas.width * 0.88;
-        const boxX = (canvas.width - boxWidth) / 2;
-        const boxY = canvas.height * 0.76;
-
-        if (activeCue) {
-          if (subtitleStyle === 'bold_banner') {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
-            ctx.beginPath();
-            ctx.roundRect(boxX, boxY, boxWidth, 68, 10);
-            ctx.fill();
-
-            ctx.fillStyle = '#ffffff';
-            ctx.font = "bold 15px 'Inter', sans-serif";
-            ctx.textAlign = 'center';
-            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 40);
-          } else if (subtitleStyle === 'minimal') {
-            ctx.fillStyle = '#ffffff';
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-            ctx.shadowBlur = 8;
-            ctx.font = "bold 16px 'Inter', sans-serif";
-            ctx.textAlign = 'center';
-            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 36);
-            ctx.shadowBlur = 0;
-          } else {
-            // Kinetic Word Highlight (Compact & Elegant, NO timestamp string)
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
-            ctx.beginPath();
-            ctx.roundRect(boxX, boxY, boxWidth, 72, 12);
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-
-            ctx.font = "bold 14px 'Inter', sans-serif";
-            ctx.textAlign = 'center';
-            ctx.fillStyle = '#e2e8f0';
-            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 28);
-
-            if (activeWord) {
-              ctx.fillStyle = '#fbbf24';
-              ctx.font = "bold 16px 'Outfit', sans-serif";
-              ctx.fillText(`👉  ${activeWord.text.toUpperCase()}  👈`, canvas.width / 2, boxY + 54);
-            }
-          }
-        }
+        // Professional Typography Canvas Overlay Renderer
+        renderCanvasOverlays({
+          canvas,
+          ctx,
+          headlineText: headline,
+          activeCue,
+          activeWord,
+          presetStyle: subtitleStyle,
+          showSafeArea,
+        });
       }
       animId = requestAnimationFrame(render);
     };
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [videoUrl, startUs, endUs, subtitleTrack, subtitleStyle, headline]);
+  }, [videoUrl, startUs, endUs, subtitleTrack, subtitleStyle, headline, showSafeArea]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -330,8 +296,6 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           <div style={styles.playerFrame}>
             <div style={styles.aspect916}>
               <canvas ref={canvasRef} width={360} height={640} style={{ width: '100%', height: '100%' }} />
-              {/* Headline Top Teaser Title */}
-              <div style={styles.headlineOverlay}>{headline || 'Headline Teaser Video'}</div>
               {showSafeArea && <div className="safe-area-overlay" />}
             </div>
           </div>
@@ -375,7 +339,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           <h4>Pengaturan Headline & Subtitle</h4>
 
           <div style={styles.controlGroup}>
-            <label style={styles.label}>Headline Teaser Text</label>
+            <label style={styles.label}>Headline Teaser Text (Hook Atas)</label>
             <input
               type="text"
               value={headline}
@@ -416,15 +380,17 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           </div>
 
           <div style={styles.controlGroup}>
-            <label style={styles.label}>✨ Gaya Subtitle (Kinetic Presets)</label>
+            <label style={styles.label}>✨ Preset Subtitle (Typography Style)</label>
             <select
               value={subtitleStyle}
               onChange={(e) => setSubtitleStyle(e.target.value as any)}
               style={styles.select}
             >
-              <option value="kinetic">Kinetic Word Highlight (Warna Kuning Emas)</option>
-              <option value="bold_banner">Bold Contrast Banner</option>
-              <option value="minimal">Minimal White Text (Clean)</option>
+              <option value="kinetic">Kinetic Modern (Gold Accent)</option>
+              <option value="clean_bold">Clean Bold (No Box)</option>
+              <option value="podcast_premium">Podcast Premium (Dark Glass Box)</option>
+              <option value="alex_style">Alex Style (Yellow Highlight)</option>
+              <option value="editorial_elegant">Editorial Elegant</option>
             </select>
           </div>
 
@@ -564,21 +530,6 @@ const styles: Record<string, React.CSSProperties> = {
     width: '100%',
     height: '100%',
     position: 'relative',
-  },
-  headlineOverlay: {
-    position: 'absolute',
-    top: '12%',
-    width: '86%',
-    left: '7%',
-    background: 'rgba(99, 102, 241, 0.92)',
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: '0.85rem',
-    textAlign: 'center',
-    padding: '0.5rem',
-    borderRadius: 'var(--radius-sm)',
-    boxShadow: 'var(--shadow-md)',
-    lineHeight: 1.3,
   },
   controlsBar: {
     marginTop: '0.75rem',
