@@ -4,7 +4,7 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
-  base: './', // Relative base path for GitHub Pages deployment
+  base: '/KhanClip-AutoClipper/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
