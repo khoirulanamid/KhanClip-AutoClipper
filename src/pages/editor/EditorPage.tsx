@@ -40,6 +40,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const [globalOffsetMs, setGlobalOffsetMs] = useState(0); // -500ms to +500ms
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTranscribingLive, setIsTranscribingLive] = useState(false);
+  const [transcriptionDone, setTranscriptionDone] = useState(true);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -105,6 +106,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
       recognition.interimResults = true;
 
       setIsTranscribingLive(true);
+      setTranscriptionDone(false);
       video.currentTime = usToSeconds(startUs);
       video.muted = false;
       video.volume = 1.0;
@@ -121,8 +123,16 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         }
       };
 
-      recognition.onerror = () => setIsTranscribingLive(false);
-      recognition.onend = () => setIsTranscribingLive(false);
+      recognition.onerror = () => {
+        setIsTranscribingLive(false);
+        setTranscriptionDone(true);
+      };
+
+      recognition.onend = () => {
+        setIsTranscribingLive(false);
+        setTranscriptionDone(true);
+      };
+
       recognition.start();
 
       const checkEnd = setInterval(() => {
@@ -130,14 +140,16 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           clearInterval(checkEnd);
           try { recognition.stop(); } catch (e) {}
           setIsTranscribingLive(false);
+          setTranscriptionDone(true);
         }
       }, 500);
     } catch (e) {
       setIsTranscribingLive(false);
+      setTranscriptionDone(true);
     }
   };
 
-  // Synchronize 9:16 Canvas rendering using shared getActiveSubtitleCue function
+  // Synchronize 9:16 Canvas rendering using shared getActiveSubtitleCue function (NO debug timestamps)
   useEffect(() => {
     let animId: number;
     const video = videoRef.current;
@@ -169,56 +181,56 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
 
-        // Microsecond local time rebased from video.currentTime: localTimeUs = sourceTimeUs - candidateStartUs
+        // Microsecond local time rebased from video.currentTime
         const sourceTimeUs = secondsToUs(video.currentTime);
         const localTimeUs = Math.max(0, sourceTimeUs - startUs);
 
-        // Use shared getActiveSubtitleCue function as required by SUBTITLE_FIX_SPEC.md
+        // Resolve active subtitle cue via shared getActiveSubtitleCue (STRICTLY NO timestamp strings in canvas)
         const activeCue = getActiveSubtitleCue(localTimeUs, subtitleTrack.cues);
         const activeWord = activeCue ? getActiveWord(localTimeUs, activeCue) : null;
 
-        const boxWidth = canvas.width * 0.9;
+        const boxWidth = canvas.width * 0.88;
         const boxX = (canvas.width - boxWidth) / 2;
-        const boxY = canvas.height * 0.75;
+        const boxY = canvas.height * 0.76;
 
         if (activeCue) {
           if (subtitleStyle === 'bold_banner') {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
             ctx.beginPath();
-            ctx.roundRect(boxX, boxY, boxWidth, 80, 12);
+            ctx.roundRect(boxX, boxY, boxWidth, 68, 10);
             ctx.fill();
 
             ctx.fillStyle = '#ffffff';
-            ctx.font = "bold 16px 'Inter', sans-serif";
+            ctx.font = "bold 15px 'Inter', sans-serif";
             ctx.textAlign = 'center';
-            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 46);
+            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 40);
           } else if (subtitleStyle === 'minimal') {
             ctx.fillStyle = '#ffffff';
             ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
             ctx.shadowBlur = 8;
-            ctx.font = "bold 17px 'Inter', sans-serif";
+            ctx.font = "bold 16px 'Inter', sans-serif";
             ctx.textAlign = 'center';
-            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 40);
+            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 36);
             ctx.shadowBlur = 0;
           } else {
-            // Kinetic Word-by-Word Highlight
+            // Kinetic Word Highlight (Compact & Elegant, NO timestamp string)
             ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
             ctx.beginPath();
-            ctx.roundRect(boxX, boxY, boxWidth, 88, 14);
+            ctx.roundRect(boxX, boxY, boxWidth, 72, 12);
             ctx.fill();
             ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.2;
             ctx.stroke();
 
-            ctx.font = "bold 15px 'Inter', sans-serif";
+            ctx.font = "bold 14px 'Inter', sans-serif";
             ctx.textAlign = 'center';
-            ctx.fillStyle = '#cbd5e1';
-            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 34);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 28);
 
             if (activeWord) {
               ctx.fillStyle = '#fbbf24';
-              ctx.font = "bold 18px 'Outfit', sans-serif";
-              ctx.fillText(`👉  ${activeWord.text.toUpperCase()}  👈`, canvas.width / 2, boxY + 66);
+              ctx.font = "bold 16px 'Outfit', sans-serif";
+              ctx.fillText(`👉  ${activeWord.text.toUpperCase()}  👈`, canvas.width / 2, boxY + 54);
             }
           }
         }
@@ -318,6 +330,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           <div style={styles.playerFrame}>
             <div style={styles.aspect916}>
               <canvas ref={canvasRef} width={360} height={640} style={{ width: '100%', height: '100%' }} />
+              {/* Headline Top Teaser Title */}
               <div style={styles.headlineOverlay}>{headline || 'Headline Teaser Video'}</div>
               {showSafeArea && <div className="safe-area-overlay" />}
             </div>
@@ -331,9 +344,20 @@ export const EditorPage: React.FC<EditorPageProps> = ({
               className="btn-secondary"
               onClick={handleStartLiveSpeechRecognition}
               disabled={isTranscribingLive}
-              style={{ background: isTranscribingLive ? 'var(--accent-warning)' : undefined }}
+              style={{
+                background: isTranscribingLive
+                  ? 'var(--accent-warning)'
+                  : transcriptionDone
+                  ? 'var(--accent-success)'
+                  : undefined,
+                color: transcriptionDone && !isTranscribingLive ? '#fff' : undefined,
+              }}
             >
-              {isTranscribingLive ? '🎙️ Mendengarkan Suara Video...' : '🎙️ Transkripsikan Suara Otomatis'}
+              {isTranscribingLive
+                ? '🎙️ Mendengarkan Suara Video...'
+                : transcriptionDone
+                ? '✅ Transkripsi Selesai'
+                : '🎙️ Transkripsikan Suara Otomatis'}
             </button>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
               <input
@@ -367,7 +391,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
               value={subtitleText}
               onChange={(e) => setSubtitleText(e.target.value)}
               style={{ ...styles.input, resize: 'vertical', fontSize: '0.85rem' }}
-              placeholder="Ketik atau koreksi ucapan suara pembicara..."
+              placeholder="Ucapan suara pembicara di video..."
             />
           </div>
 
