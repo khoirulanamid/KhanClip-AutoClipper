@@ -24,7 +24,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
   const [headline, setHeadline] = useState(currentCandidate?.headline || '');
   const [subtitleText, setSubtitleText] = useState(
-    currentCandidate?.transcriptText || currentCandidate?.headline || ''
+    currentCandidate?.transcriptText || ''
   );
   const [subtitleStyle, setSubtitleStyle] = useState<'kinetic' | 'minimal' | 'bold_banner'>('kinetic');
   const [layout, setLayout] = useState(currentCandidate?.selectedLayout || 'smart_editorial');
@@ -32,6 +32,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const [startUs, setStartUs] = useState(currentCandidate?.startUs || 0);
   const [endUs, setEndUs] = useState(currentCandidate?.endUs || 30000000);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isTranscribingLive, setIsTranscribingLive] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,7 +48,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const handleSelectCandidate = (cand: Candidate) => {
     setActiveId(cand.id);
     setHeadline(cand.headline);
-    setSubtitleText(cand.transcriptText || cand.headline || '');
+    setSubtitleText(cand.transcriptText || '');
     setLayout(cand.selectedLayout);
     setStartUs(cand.startUs);
     setEndUs(cand.endUs);
@@ -56,6 +57,67 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     if (video) {
       const startSec = cand.startUs / 1000000;
       video.currentTime = startSec;
+    }
+  };
+
+  // Live Speech Recognition on video playback
+  const handleStartLiveSpeechRecognition = () => {
+    const SpeechRecognition = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+    const video = videoRef.current;
+
+    if (!SpeechRecognition) {
+      alert('Fitur Speech Recognition bawaan memerlukan peramban Chrome atau Edge Desktop.');
+      return;
+    }
+
+    if (!video) return;
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'id-ID';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      setIsTranscribingLive(true);
+      const startSec = startUs / 1000000;
+      video.currentTime = startSec;
+      video.muted = false;
+      video.volume = 1.0;
+      video.play();
+      setIsPlaying(true);
+
+      recognition.onresult = (event: any) => {
+        let liveTranscript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          liveTranscript += event.results[i][0].transcript + ' ';
+        }
+        if (liveTranscript.trim()) {
+          setSubtitleText(liveTranscript.trim());
+        }
+      };
+
+      recognition.onerror = () => {
+        setIsTranscribingLive(false);
+      };
+
+      recognition.onend = () => {
+        setIsTranscribingLive(false);
+      };
+
+      recognition.start();
+
+      // Stop recognition when video reaches endUs
+      const checkEnd = setInterval(() => {
+        if (video.currentTime >= endUs / 1000000 || video.paused) {
+          clearInterval(checkEnd);
+          try {
+            recognition.stop();
+          } catch (e) {}
+          setIsTranscribingLive(false);
+        }
+      }, 500);
+    } catch (e) {
+      setIsTranscribingLive(false);
     }
   };
 
@@ -96,11 +158,11 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         const candStartSec = startUs / 1000000;
         const elapsedSec = Math.max(0, curTimeSec - candStartSec);
 
-        const words = subtitleText.split(' ').filter(Boolean);
+        const textToDisplay = subtitleText || headline || 'Gunakan tombol Transkrip Suara atau edit teks ucapan di kanan';
+        const words = textToDisplay.split(/\s+/).filter(Boolean);
         const totalWords = Math.max(1, words.length);
         const candDurationSec = Math.max(1, (endUs - startUs) / 1000000);
 
-        // Calculate speech pacing per word
         const wordsPerSec = totalWords / candDurationSec;
         const activeWordIndex = Math.min(words.length - 1, Math.floor(elapsedSec * wordsPerSec));
 
@@ -137,7 +199,6 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           ctx.lineWidth = 1.5;
           ctx.stroke();
 
-          // Render spoken words with active word highlighted in gold/yellow #fbbf24
           const displayWords = words.slice(Math.max(0, activeWordIndex - 3), activeWordIndex + 4);
           const currentWord = words[activeWordIndex] || '';
 
@@ -161,7 +222,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [videoUrl, startUs, endUs, subtitleText, subtitleStyle]);
+  }, [videoUrl, startUs, endUs, subtitleText, subtitleStyle, headline]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -212,7 +273,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         </button>
       </header>
 
-      {/* Hidden real HTML5 Video element */}
+      {/* Real HTML5 Video element */}
       {videoUrl && (
         <video
           ref={videoRef}
@@ -268,13 +329,21 @@ export const EditorPage: React.FC<EditorPageProps> = ({
             <button className="btn-primary" onClick={togglePlay}>
               {isPlaying ? '⏸️ Pause Video' : '▶️ Play Preview 9:16'}
             </button>
+            <button
+              className="btn-secondary"
+              onClick={handleStartLiveSpeechRecognition}
+              disabled={isTranscribingLive}
+              style={{ background: isTranscribingLive ? 'var(--accent-warning)' : undefined }}
+            >
+              {isTranscribingLive ? '🎙️ Mendengarkan Suara Video...' : '🎙️ Transkripsikan Suara Otomatis'}
+            </button>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
               <input
                 type="checkbox"
                 checked={showSafeArea}
                 onChange={(e) => setShowSafeArea(e.target.checked)}
               />
-              Tampilkan Safe Area (TikTok / Shorts UI)
+              Safe Area
             </label>
           </div>
         </main>
@@ -294,16 +363,16 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           </div>
 
           <div style={styles.controlGroup}>
-            <label style={styles.label}>📝 Edit Teks Subtitle Suara Video</label>
+            <label style={styles.label}>📝 Edit Teks Subtitle (Suara Video)</label>
             <textarea
-              rows={4}
+              rows={5}
               value={subtitleText}
               onChange={(e) => setSubtitleText(e.target.value)}
               style={{ ...styles.input, resize: 'vertical', fontSize: '0.85rem' }}
-              placeholder="Tulis atau pasing teks ucapan suara di sini agar pas 100%..."
+              placeholder="Klik '🎙️ Transkripsikan Suara Otomatis' atau ketik teks ucapan suara di sini..."
             />
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Ketik atau koreksi ucapan asli video untuk penyesuaian teks 100% pas.
+              Edit atau ketik ucapan video untuk penyesuaian teks 100% akurat.
             </span>
           </div>
 
@@ -345,7 +414,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
               style={{ width: '100%', fontSize: '0.85rem' }}
               onClick={() => {
                 setHeadline(currentCandidate.headline);
-                setSubtitleText(currentCandidate.transcriptText || currentCandidate.headline);
+                setSubtitleText(currentCandidate.transcriptText || '');
                 setLayout(currentCandidate.recommendedLayout);
               }}
             >
@@ -480,7 +549,8 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: '0.75rem',
     display: 'flex',
     alignItems: 'center',
-    gap: '1.5rem',
+    gap: '0.75rem',
+    flexWrap: 'wrap',
   },
   sidebarRight: {
     background: 'var(--surface-card)',

@@ -3,7 +3,7 @@ import { TranscriptDocument, TranscriptSegment, WordTimestamp } from '@/domain/t
 
 /**
  * Real Voice Speech-to-Text Recognition Engine.
- * Listens to the actual audio track of the video file using Chrome/Edge native SpeechRecognition (id-ID).
+ * Transcribes actual speech segments without static template phrases.
  * 100% Local processing in browser.
  */
 export async function transcribeAudioSegments(
@@ -14,9 +14,7 @@ export async function transcribeAudioSegments(
 ): Promise<Result<TranscriptDocument>> {
   const segments: TranscriptSegment[] = [];
 
-  // Attempt real browser Speech-to-Text recognition if videoFile is provided and SpeechRecognition is supported
   const SpeechRecognition = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
-
   let realTranscripts: string[] = [];
 
   if (videoFile && SpeechRecognition) {
@@ -66,7 +64,6 @@ export async function transcribeAudioSegments(
           }
         };
 
-        // Stop recognition after sampling first 10 seconds for fast analysis
         setTimeout(() => {
           try {
             audio.pause();
@@ -74,26 +71,24 @@ export async function transcribeAudioSegments(
           } catch (e) {}
           URL.revokeObjectURL(objectUrl);
           resolve(results);
-        }, 6000);
+        }, 5000);
       });
     } catch (e) {
-      // Fallback if SpeechRecognition errors out
+      // Ignore background errors
     }
   }
 
   for (let i = 0; i < speechSegments.length; i++) {
     const seg = speechSegments[i];
+    const candNum = (i + 1).toString().padStart(2, '0');
+    const startSec = (seg.startUs / 1000000).toFixed(1);
+    const endSec = (seg.endUs / 1000000).toFixed(1);
+
+    // Strictly NO hardcoded template sentences!
     let segmentText = realTranscripts[i] || '';
 
     if (!segmentText) {
-      const defaultPhrases = [
-        'Halo selamat datang di pembahasan utama video ini.',
-        'Kita membahas poin penting dan strategi terbaik.',
-        'Perhatikan bagian kunci ini yang menentukan hasil.',
-        'Berdasarkan pengalaman, fokus pada konsistensi harian.',
-        'Kesimpulannya adalah tingkatkan eksekusi setiap hari.'
-      ];
-      segmentText = defaultPhrases[i % defaultPhrases.length];
+      segmentText = `Momen ucapan video #${candNum} (${startSec}s - ${endSec}s)`;
     }
 
     const wordsList = segmentText.split(/\s+/).filter(Boolean);
