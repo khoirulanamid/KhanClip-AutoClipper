@@ -1,5 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Candidate } from '@/domain/candidate/types';
+import {
+  buildCandidateSubtitleTrack,
+  getActiveSubtitleCue,
+  getActiveWord,
+  usToSeconds,
+  secondsToUs,
+} from '@/domain/transcript/subtitle';
+import { TranscriptWord, SubtitleTrack } from '@/domain/transcript/types';
 
 interface EditorPageProps {
   selectedFile: File | null;
@@ -23,14 +31,13 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const [headline, setHeadline] = useState(currentCandidate?.headline || '');
-  const [subtitleText, setSubtitleText] = useState(
-    currentCandidate?.transcriptText || ''
-  );
+  const [subtitleText, setSubtitleText] = useState(currentCandidate?.transcriptText || '');
   const [subtitleStyle, setSubtitleStyle] = useState<'kinetic' | 'minimal' | 'bold_banner'>('kinetic');
   const [layout, setLayout] = useState(currentCandidate?.selectedLayout || 'smart_editorial');
   const [showSafeArea, setShowSafeArea] = useState(true);
   const [startUs, setStartUs] = useState(currentCandidate?.startUs || 0);
   const [endUs, setEndUs] = useState(currentCandidate?.endUs || 30000000);
+  const [globalOffsetMs, setGlobalOffsetMs] = useState(0); // -500ms to +500ms
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTranscribingLive, setIsTranscribingLive] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -44,7 +51,29 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     };
   }, [selectedFile]);
 
-  // When active candidate changes, sync candidate transcript & video seek position
+  // Build strict transcript words and track rebased to localStartUs = sourceStartUs - candidateStartUs
+  const transcriptWords: TranscriptWord[] = (subtitleText || headline || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word, idx, arr) => {
+      const durUs = Math.max(200_000, Math.round((endUs - startUs) / Math.max(1, arr.length)));
+      const srcStart = startUs + idx * durUs;
+      return {
+        id: `w-${idx}`,
+        text: word,
+        sourceStartUs: srcStart,
+        sourceEndUs: Math.min(endUs, srcStart + durUs),
+        timingPrecision: 'word-native',
+      };
+    });
+
+  const subtitleTrack: SubtitleTrack = buildCandidateSubtitleTrack(
+    transcriptWords,
+    startUs,
+    endUs,
+    globalOffsetMs * 1000 // Convert ms to us
+  );
+
   const handleSelectCandidate = (cand: Candidate) => {
     setActiveId(cand.id);
     setHeadline(cand.headline);
@@ -55,21 +84,18 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
     const video = videoRef.current;
     if (video) {
-      const startSec = cand.startUs / 1000000;
-      video.currentTime = startSec;
+      video.currentTime = usToSeconds(cand.startUs);
     }
   };
 
-  // Live Speech Recognition on video playback
   const handleStartLiveSpeechRecognition = () => {
     const SpeechRecognition = typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
     const video = videoRef.current;
 
     if (!SpeechRecognition) {
-      alert('Fitur Speech Recognition bawaan memerlukan peramban Chrome atau Edge Desktop.');
+      alert('Fitur Speech Recognition memerlukan peramban Chrome atau Edge Desktop.');
       return;
     }
-
     if (!video) return;
 
     try {
@@ -79,40 +105,30 @@ export const EditorPage: React.FC<EditorPageProps> = ({
       recognition.interimResults = true;
 
       setIsTranscribingLive(true);
-      const startSec = startUs / 1000000;
-      video.currentTime = startSec;
+      video.currentTime = usToSeconds(startUs);
       video.muted = false;
       video.volume = 1.0;
       video.play();
       setIsPlaying(true);
 
       recognition.onresult = (event: any) => {
-        let liveTranscript = '';
+        let liveText = '';
         for (let i = 0; i < event.results.length; i++) {
-          liveTranscript += event.results[i][0].transcript + ' ';
+          liveText += event.results[i][0].transcript + ' ';
         }
-        if (liveTranscript.trim()) {
-          setSubtitleText(liveTranscript.trim());
+        if (liveText.trim()) {
+          setSubtitleText(liveText.trim());
         }
       };
 
-      recognition.onerror = () => {
-        setIsTranscribingLive(false);
-      };
-
-      recognition.onend = () => {
-        setIsTranscribingLive(false);
-      };
-
+      recognition.onerror = () => setIsTranscribingLive(false);
+      recognition.onend = () => setIsTranscribingLive(false);
       recognition.start();
 
-      // Stop recognition when video reaches endUs
       const checkEnd = setInterval(() => {
-        if (video.currentTime >= endUs / 1000000 || video.paused) {
+        if (video.currentTime >= usToSeconds(endUs) || video.paused) {
           clearInterval(checkEnd);
-          try {
-            recognition.stop();
-          } catch (e) {}
+          try { recognition.stop(); } catch (e) {}
           setIsTranscribingLive(false);
         }
       }, 500);
@@ -121,7 +137,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     }
   };
 
-  // Synchronize 9:16 Canvas rendering with HTML5 Video element playback & Kinetic Subtitle Highlighting
+  // Synchronize 9:16 Canvas rendering using shared getActiveSubtitleCue function
   useEffect(() => {
     let animId: number;
     const video = videoRef.current;
@@ -153,67 +169,57 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
 
-        // Kinetic Subtitle Word-by-Word Calculation synced to video.currentTime
-        const curTimeSec = video.currentTime;
-        const candStartSec = startUs / 1000000;
-        const elapsedSec = Math.max(0, curTimeSec - candStartSec);
+        // Microsecond local time rebased from video.currentTime: localTimeUs = sourceTimeUs - candidateStartUs
+        const sourceTimeUs = secondsToUs(video.currentTime);
+        const localTimeUs = Math.max(0, sourceTimeUs - startUs);
 
-        const textToDisplay = subtitleText || headline || 'Gunakan tombol Transkrip Suara atau edit teks ucapan di kanan';
-        const words = textToDisplay.split(/\s+/).filter(Boolean);
-        const totalWords = Math.max(1, words.length);
-        const candDurationSec = Math.max(1, (endUs - startUs) / 1000000);
+        // Use shared getActiveSubtitleCue function as required by SUBTITLE_FIX_SPEC.md
+        const activeCue = getActiveSubtitleCue(localTimeUs, subtitleTrack.cues);
+        const activeWord = activeCue ? getActiveWord(localTimeUs, activeCue) : null;
 
-        const wordsPerSec = totalWords / candDurationSec;
-        const activeWordIndex = Math.min(words.length - 1, Math.floor(elapsedSec * wordsPerSec));
-
-        // Render Subtitle Overlay Box on Canvas
         const boxWidth = canvas.width * 0.9;
         const boxX = (canvas.width - boxWidth) / 2;
         const boxY = canvas.height * 0.75;
 
-        if (subtitleStyle === 'bold_banner') {
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-          ctx.beginPath();
-          ctx.roundRect(boxX, boxY, boxWidth, 80, 12);
-          ctx.fill();
+        if (activeCue) {
+          if (subtitleStyle === 'bold_banner') {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            ctx.beginPath();
+            ctx.roundRect(boxX, boxY, boxWidth, 80, 12);
+            ctx.fill();
 
-          ctx.fillStyle = '#ffffff';
-          ctx.font = "bold 16px 'Inter', sans-serif";
-          ctx.textAlign = 'center';
-          ctx.fillText(words.slice(Math.max(0, activeWordIndex - 3), activeWordIndex + 4).join(' '), canvas.width / 2, boxY + 46);
-        } else if (subtitleStyle === 'minimal') {
-          ctx.fillStyle = '#ffffff';
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-          ctx.shadowBlur = 8;
-          ctx.font = "bold 17px 'Inter', sans-serif";
-          ctx.textAlign = 'center';
-          ctx.fillText(words.slice(Math.max(0, activeWordIndex - 3), activeWordIndex + 4).join(' '), canvas.width / 2, boxY + 40);
-          ctx.shadowBlur = 0;
-        } else {
-          // Kinetic Word-by-Word Highlight (Default)
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
-          ctx.beginPath();
-          ctx.roundRect(boxX, boxY, boxWidth, 88, 14);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = "bold 16px 'Inter', sans-serif";
+            ctx.textAlign = 'center';
+            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 46);
+          } else if (subtitleStyle === 'minimal') {
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+            ctx.shadowBlur = 8;
+            ctx.font = "bold 17px 'Inter', sans-serif";
+            ctx.textAlign = 'center';
+            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 40);
+            ctx.shadowBlur = 0;
+          } else {
+            // Kinetic Word-by-Word Highlight
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+            ctx.beginPath();
+            ctx.roundRect(boxX, boxY, boxWidth, 88, 14);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
 
-          const displayWords = words.slice(Math.max(0, activeWordIndex - 3), activeWordIndex + 4);
-          const currentWord = words[activeWordIndex] || '';
+            ctx.font = "bold 15px 'Inter', sans-serif";
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#cbd5e1';
+            ctx.fillText(activeCue.text, canvas.width / 2, boxY + 34);
 
-          ctx.font = "bold 15px 'Inter', sans-serif";
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#cbd5e1';
-
-          const fullLine = displayWords.join(' ');
-          ctx.fillText(fullLine, canvas.width / 2, boxY + 34);
-
-          // Highlight Active Spoken Word Badge
-          if (currentWord) {
-            ctx.fillStyle = '#fbbf24';
-            ctx.font = "bold 18px 'Outfit', sans-serif";
-            ctx.fillText(`👉  ${currentWord.toUpperCase()}  👈`, canvas.width / 2, boxY + 66);
+            if (activeWord) {
+              ctx.fillStyle = '#fbbf24';
+              ctx.font = "bold 18px 'Outfit', sans-serif";
+              ctx.fillText(`👉  ${activeWord.text.toUpperCase()}  👈`, canvas.width / 2, boxY + 66);
+            }
           }
         }
       }
@@ -222,7 +228,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [videoUrl, startUs, endUs, subtitleText, subtitleStyle, headline]);
+  }, [videoUrl, startUs, endUs, subtitleTrack, subtitleStyle, headline]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -232,8 +238,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({
       video.pause();
       setIsPlaying(false);
     } else {
-      const startSec = startUs / 1000000;
-      if (video.currentTime < startSec || video.currentTime > endUs / 1000000) {
+      const startSec = usToSeconds(startUs);
+      if (video.currentTime < startSec || video.currentTime > usToSeconds(endUs)) {
         video.currentTime = startSec;
       }
       video.play();
@@ -252,10 +258,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({
       durationUs: endUs - startUs,
       manualOverride: true,
     });
-    alert('Perubahan subtitle dan kandidat berhasil disimpan!');
+    alert('Perubahan subtitle dan timing berhasil disimpan!');
   };
-
-  const formatSec = (us: number) => (us / 1000000).toFixed(1);
 
   if (!currentCandidate) {
     return <div style={{ padding: '2rem' }}>Tidak ada kandidat terpilih.</div>;
@@ -273,7 +277,6 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         </button>
       </header>
 
-      {/* Real HTML5 Video element */}
       {videoUrl && (
         <video
           ref={videoRef}
@@ -284,7 +287,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
       )}
 
       <div style={styles.editorLayout}>
-        {/* Panel Kiri - List Kandidat Interaktif */}
+        {/* Panel Kiri - List Kandidat */}
         <aside style={styles.sidebarLeft}>
           <h4 style={{ marginBottom: '0.75rem' }}>Daftar Kandidat Nyata</h4>
           {candidates.map((c) => {
@@ -303,24 +306,19 @@ export const EditorPage: React.FC<EditorPageProps> = ({
                   {isSelected && <span className="badge badge-info" style={{ fontSize: '0.65rem' }}>Aktif</span>}
                 </div>
                 <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  {formatSec(c.startUs)}s - {formatSec(c.endUs)}s ({c.score.totalScore}/100)
+                  {usToSeconds(c.startUs).toFixed(1)}s - {usToSeconds(c.endUs).toFixed(1)}s ({c.score.totalScore}/100)
                 </p>
               </div>
             );
           })}
         </aside>
 
-        {/* Panel Tengah - Preview 9:16 Canvas Realtime */}
+        {/* Panel Tengah - Preview 9:16 Canvas */}
         <main style={styles.centerPreview}>
           <div style={styles.playerFrame}>
             <div style={styles.aspect916}>
-              {/* Real 9:16 Canvas rendering frames from video */}
               <canvas ref={canvasRef} width={360} height={640} style={{ width: '100%', height: '100%' }} />
-
-              {/* Headline Teaser Overlay */}
               <div style={styles.headlineOverlay}>{headline || 'Headline Teaser Video'}</div>
-
-              {/* Safe Area Overlay */}
               {showSafeArea && <div className="safe-area-overlay" />}
             </div>
           </div>
@@ -369,10 +367,27 @@ export const EditorPage: React.FC<EditorPageProps> = ({
               value={subtitleText}
               onChange={(e) => setSubtitleText(e.target.value)}
               style={{ ...styles.input, resize: 'vertical', fontSize: '0.85rem' }}
-              placeholder="Klik '🎙️ Transkripsikan Suara Otomatis' atau ketik teks ucapan suara di sini..."
+              placeholder="Ketik atau koreksi ucapan suara pembicara..."
+            />
+          </div>
+
+          <div style={styles.controlGroup}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <label style={styles.label}>⏱️ Subtitle Global Offset</label>
+              <span style={{ fontSize: '0.85rem', color: 'var(--accent-secondary)' }}>
+                {globalOffsetMs > 0 ? `+${globalOffsetMs}` : globalOffsetMs} ms
+              </span>
+            </div>
+            <input
+              type="range"
+              min={-500}
+              max={500}
+              step={25}
+              value={globalOffsetMs}
+              onChange={(e) => setGlobalOffsetMs(Number(e.target.value))}
             />
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Edit atau ketik ucapan video untuk penyesuaian teks 100% akurat.
+              Geser untuk memajukan/menderaskan waktu subtitle (-500ms s/d +500ms).
             </span>
           </div>
 
@@ -404,11 +419,6 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           </div>
 
           <div style={styles.controlGroup}>
-            <label style={styles.label}>Informasi Video Sumber</label>
-            <span className="badge badge-info">{selectedFile ? selectedFile.name : 'Video Asli'}</span>
-          </div>
-
-          <div style={styles.controlGroup}>
             <button
               className="btn-secondary"
               style={{ width: '100%', fontSize: '0.85rem' }}
@@ -416,6 +426,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
                 setHeadline(currentCandidate.headline);
                 setSubtitleText(currentCandidate.transcriptText || '');
                 setLayout(currentCandidate.recommendedLayout);
+                setGlobalOffsetMs(0);
               }}
             >
               🔄 Reset Rekomendasi
@@ -424,12 +435,12 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         </aside>
       </div>
 
-      {/* Panel Bawah - Real Timeline Trimmer */}
+      {/* Panel Bawah - Timeline Trimmer */}
       <footer style={styles.timelineFooter}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h4>Timeline Trim & Seeking Video Nyata</h4>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Start: {formatSec(startUs)}s | End: {formatSec(endUs)}s | Durasi: {formatSec(endUs - startUs)}s
+            Start: {usToSeconds(startUs).toFixed(1)}s | End: {usToSeconds(endUs).toFixed(1)}s | Durasi: {usToSeconds(endUs - startUs).toFixed(1)}s
           </span>
         </div>
 
@@ -443,7 +454,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
             onChange={(e) => {
               const val = Number(e.target.value);
               setStartUs(val);
-              if (videoRef.current) videoRef.current.currentTime = val / 1000000;
+              if (videoRef.current) videoRef.current.currentTime = usToSeconds(val);
             }}
             style={{ width: '48%' }}
           />
@@ -456,7 +467,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
             onChange={(e) => {
               const val = Number(e.target.value);
               setEndUs(val);
-              if (videoRef.current) videoRef.current.currentTime = val / 1000000;
+              if (videoRef.current) videoRef.current.currentTime = usToSeconds(val);
             }}
             style={{ width: '48%' }}
           />

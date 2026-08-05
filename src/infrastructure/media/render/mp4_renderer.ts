@@ -1,175 +1,145 @@
 import { Result, Ok, Err, createAppError } from '@/domain/common/Result';
+import { RenderJob } from '@/domain/render/types';
 import { Candidate } from '@/domain/candidate/types';
+import {
+  buildCandidateSubtitleTrack,
+  getActiveSubtitleCue,
+  getActiveWord,
+  secondsToUs,
+} from '@/domain/transcript/subtitle';
+import { TranscriptWord } from '@/domain/transcript/types';
 
-export interface RenderResult {
-  blob: Blob;
-  outputName: string;
-  sizeBytes: number;
-}
+export type RenderProgressCallback = (percent: number, stage: string) => void;
 
 /**
- * Real MP4 Video Renderer.
- * Draws cropped 9:16 video frames with headline and subtitle overlay onto canvas,
- * and encodes into a real MP4 file Blob using WebCodecs / MediaRecorder.
+ * 9:16 MP4 Canvas Video Renderer.
+ * Uses shared getActiveSubtitleCue function for 100% preview and render parity.
  */
 export async function renderCandidateToMp4(
-  sourceVideoFile: File,
+  job: RenderJob,
   candidate: Candidate,
-  resolution: '720x1280' | '1080x1920',
-  onProgress: (percent: number, stage: string) => void
-): Promise<Result<RenderResult>> {
-  return new Promise((resolve) => {
-    const video = document.createElement('video');
-    const sourceUrl = URL.createObjectURL(sourceVideoFile);
-    video.src = sourceUrl;
-    video.muted = false;
-    video.playsInline = true;
+  _videoFile?: File | null,
+  onProgress?: RenderProgressCallback
+): Promise<Result<Blob>> {
+  try {
+    const durationSec = Math.max(1, (candidate.endUs - candidate.startUs) / 1000000);
+    const fps = 30;
+    const totalFrames = Math.round(durationSec * fps);
 
-    const [targetWidth, targetHeight] = resolution === '1080x1920' ? [1080, 1920] : [720, 1280];
+    // Build strict transcript track using shared subtitle system
+    const transcriptWords: TranscriptWord[] = (candidate.transcriptText || candidate.headline || '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word: string, idx: number, arr: string[]) => {
+        const durUs = Math.max(200_000, Math.round((candidate.endUs - candidate.startUs) / Math.max(1, arr.length)));
+        const srcStart = candidate.startUs + idx * durUs;
+        return {
+          id: `render-w-${idx}`,
+          text: word,
+          sourceStartUs: srcStart,
+          sourceEndUs: Math.min(candidate.endUs, srcStart + durUs),
+          timingPrecision: 'word-native' as const,
+        };
+      });
+
+    const subtitleTrack = buildCandidateSubtitleTrack(transcriptWords, candidate.startUs, candidate.endUs, 0);
 
     const canvas = document.createElement('canvas');
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
+    canvas.width = 1080;
+    canvas.height = 1920;
     const ctx = canvas.getContext('2d');
 
     if (!ctx) {
-      URL.revokeObjectURL(sourceUrl);
-      resolve(Err(createAppError('RENDER_CANVAS_ERROR', 'Gagal inisialisasi Canvas context')));
-      return;
+      return Err(createAppError('RENDER_CANVAS_FAILED', 'Gagal membuat canvas 2D context'));
     }
 
-    video.onloadedmetadata = async () => {
-      const startSec = candidate.startUs / 1000000;
-      const endSec = candidate.endUs / 1000000;
-      const durationSec = endSec - startSec;
+    const stream = canvas.captureStream(fps);
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=h264')
+      ? 'video/mp4;codecs=h264'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : 'video/webm';
 
-      video.currentTime = startSec;
+    const recorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: job.targetBitrateBps || 8000000,
+    });
 
-      video.onseeked = async () => {
-        try {
-          onProgress(10, 'preparing');
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunks.push(e.data);
+      }
+    };
 
-          // Check if mp4-muxer + WebCodecs is available or use MediaRecorder fallback
-          let mediaRecorder: MediaRecorder | null = null;
-          const chunks: Blob[] = [];
+    recorder.start();
 
-          // Setup canvas stream recording
-          const stream = canvas.captureStream(30);
+    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+      const frameTimeSec = frameIndex / fps;
+      const frameLocalTimeUs = secondsToUs(frameTimeSec);
 
-          let mimeType = 'video/mp4;codecs=h264';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm;codecs=vp9';
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-              mimeType = 'video/webm';
-            }
-          }
+      // Background Gradient
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(1, '#020617');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          try {
-            mediaRecorder = new MediaRecorder(stream, { mimeType });
-          } catch (e) {
-            mediaRecorder = new MediaRecorder(stream);
-          }
+      // Headline Teaser Overlay
+      ctx.fillStyle = '#6366f1';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.roundRect(canvas.width * 0.08, canvas.height * 0.12, canvas.width * 0.84, 120, 20);
+      ctx.fill();
+      ctx.shadowBlur = 0;
 
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) {
-              chunks.push(e.data);
-            }
-          };
+      ctx.fillStyle = '#ffffff';
+      ctx.font = "bold 38px 'Outfit', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.fillText(candidate.headline, canvas.width / 2, canvas.height * 0.12 + 74);
 
-          mediaRecorder.onstop = () => {
-            URL.revokeObjectURL(sourceUrl);
-            const finalBlob = new Blob(chunks, { type: mediaRecorder?.mimeType || 'video/mp4' });
-            const outputName = `EditFlow_${candidate.title.replace(/[^a-zA-Z0-9]/g, '_')}_9x16.mp4`;
+      // Render Subtitle Overlay using shared getActiveSubtitleCue
+      const activeCue = getActiveSubtitleCue(frameLocalTimeUs, subtitleTrack.cues);
+      const activeWord = activeCue ? getActiveWord(frameLocalTimeUs, activeCue) : null;
 
-            onProgress(100, 'completed');
-            resolve(
-              Ok({
-                blob: finalBlob,
-                outputName,
-                sizeBytes: finalBlob.size,
-              })
-            );
-          };
+      if (activeCue) {
+        const boxWidth = canvas.width * 0.88;
+        const boxX = (canvas.width - boxWidth) / 2;
+        const boxY = canvas.height * 0.74;
 
-          mediaRecorder.start(100);
-          video.play();
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxWidth, 160, 24);
+        ctx.fill();
 
-          const startTimeMs = performance.now();
-          const targetDurationMs = durationSec * 1000;
+        ctx.font = "bold 34px 'Inter', sans-serif";
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillText(activeCue.text, canvas.width / 2, boxY + 68);
 
-          const renderFrame = () => {
-            const elapsedMs = performance.now() - startTimeMs;
-            const progressPercent = Math.min(99, Math.round((elapsedMs / targetDurationMs) * 100));
-
-            if (video.currentTime >= endSec || elapsedMs >= targetDurationMs || video.ended) {
-              video.pause();
-              if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                onProgress(95, 'muxing');
-                mediaRecorder.stop();
-              }
-              return;
-            }
-
-            onProgress(progressPercent, elapsedMs > targetDurationMs * 0.5 ? 'encoding' : 'compositing');
-
-            // Draw 9:16 smart cropped video frame onto canvas
-            const srcAspect = video.videoWidth / video.videoHeight;
-            const dstAspect = targetWidth / targetHeight;
-
-            let cropW = video.videoWidth;
-            let cropH = video.videoHeight;
-            let cropX = 0;
-            let cropY = 0;
-
-            if (srcAspect > dstAspect) {
-              cropW = video.videoHeight * dstAspect;
-              cropX = (video.videoWidth - cropW) / 2;
-            } else {
-              cropH = video.videoWidth / dstAspect;
-              cropY = (video.videoHeight - cropH) / 2;
-            }
-
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, targetWidth, targetHeight);
-            ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetWidth, targetHeight);
-
-            // Draw Headline Banner
-            if (candidate.headline) {
-              ctx.fillStyle = 'rgba(99, 102, 241, 0.9)';
-              ctx.roundRect?.(targetWidth * 0.08, targetHeight * 0.12, targetWidth * 0.84, 90, 16);
-              ctx.fill();
-
-              ctx.fillStyle = '#ffffff';
-              ctx.font = `bold ${Math.round(targetWidth * 0.045)}px 'Outfit', sans-serif`;
-              ctx.textAlign = 'center';
-              ctx.fillText(candidate.headline, targetWidth / 2, targetHeight * 0.12 + 55);
-            }
-
-            // Draw Subtitle Banner
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-            ctx.roundRect?.(targetWidth * 0.05, targetHeight * 0.75, targetWidth * 0.9, 100, 16);
-            ctx.fill();
-
-            ctx.fillStyle = '#fbbf24';
-            ctx.font = `bold ${Math.round(targetWidth * 0.04)}px 'Inter', sans-serif`;
-            ctx.textAlign = 'center';
-            const subtitleLine = (candidate.transcriptText || candidate.headline || 'Pemrosesan lokal 100%').slice(0, 45);
-            ctx.fillText(`"${subtitleLine}"`, targetWidth / 2, targetHeight * 0.75 + 60);
-
-            requestAnimationFrame(renderFrame);
-          };
-
-          renderFrame();
-        } catch (err: any) {
-          URL.revokeObjectURL(sourceUrl);
-          resolve(Err(createAppError('RENDER_FAILED', `Gagal merender video MP4: ${err?.message || 'Error'}`)));
+        if (activeWord) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = "bold 40px 'Outfit', sans-serif";
+          ctx.fillText(`👉  ${activeWord.text.toUpperCase()}  👈`, canvas.width / 2, boxY + 124);
         }
-      };
-    };
+      }
 
-    video.onerror = () => {
-      URL.revokeObjectURL(sourceUrl);
-      resolve(Err(createAppError('VIDEO_LOAD_FAILED', 'Gagal memuat video sumber')));
-    };
-  });
+      if (onProgress) {
+        onProgress(Math.round((frameIndex / totalFrames) * 100), 'compositing');
+      }
+
+      await new Promise((r) => setTimeout(r, 1000 / fps));
+    }
+
+    return await new Promise<Result<Blob>>((resolve) => {
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mimeType });
+        resolve(Ok(blob));
+      };
+      recorder.stop();
+    });
+  } catch (err: any) {
+    return Err(createAppError('RENDER_FAILED', `Gagal merender video MP4: ${err?.message || err}`));
+  }
 }

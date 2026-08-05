@@ -70,10 +70,10 @@ export const RenderQueuePage: React.FC<RenderQueuePageProps> = ({
     );
 
     const renderRes = await renderCandidateToMp4(
-      selectedFile,
+      currentItem.job,
       cand,
-      currentItem.job.resolution,
-      (percent, stage) => {
+      selectedFile,
+      (percent: number, stage: string) => {
         setItems((prev) =>
           prev.map((item, idx) =>
             idx === index
@@ -102,11 +102,11 @@ export const RenderQueuePage: React.FC<RenderQueuePageProps> = ({
           idx === index
             ? {
                 ...item,
-                blob: renderRes.value.blob,
+                blob: renderRes.value,
                 job: {
                   ...item.job,
                   status: 'completed',
-                  outputName: renderRes.value.outputName,
+                  outputName: item.job.outputName,
                   completedAt: new Date().toISOString(),
                   progress: { ...item.job.progress, percent: 100, stage: 'completed' },
                 },
