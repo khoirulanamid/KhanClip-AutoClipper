@@ -1,0 +1,54 @@
+:root {
+  /* Color Palette - Modern Dark Theme */
+  --bg-dark-900: #0a0c10;
+  --bg-dark-800: #121620;
+  --bg-dark-700: #1a202c;
+  --bg-dark-600: #242c3d;
+
+  --surface-card: #141a24;
+  --surface-card-hover: #1c2432;
+  --surface-border: #2a3447;
+  --surface-border-accent: #3b4863;
+
+  /* Accent Colors */
+  --accent-primary: #6366f1; /* Indigo */
+  --accent-primary-hover: #4f46e5;
+  --accent-secondary: #06b6d4; /* Cyan */
+  --accent-success: #10b981; /* Emerald */
+  --accent-warning: #f59e0b; /* Amber */
+  --accent-danger: #ef4444; /* Red */
+
+  /* Text Colors */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-inverse: #0f172a;
+
+  /* Typography */
+  --font-heading: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Spacing */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  /* Shadows & Glassmorphism */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+  --glass-bg: rgba(20, 26, 36, 0.75);
+  --glass-border: rgba(255, 255, 255, 0.08);
+
+  /* Aspect Ratios & Dimensions */
+  --aspect-vertical: 9 / 16;
+}

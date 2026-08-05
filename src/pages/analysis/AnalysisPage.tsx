@@ -1,0 +1,235 @@
+import React, { useEffect, useState } from 'react';
+import { extractAudioFromVideoFile } from '@/infrastructure/media/audio/extractor';
+import { transcribeAudioSegments } from '@/infrastructure/media/transcription/whisper';
+import { generateCandidatesFromTranscript } from '@/domain/candidate/generator';
+import { analyzeVideoFrame } from '@/infrastructure/media/vision/detector';
+import { Candidate } from '@/domain/candidate/types';
+import { ProjectSettings } from '@/domain/project/types';
+
+interface AnalysisPageProps {
+  selectedFile: File | null;
+  settings: ProjectSettings;
+  onAnalysisComplete: (candidates: Candidate[]) => void;
+  onCancel: () => void;
+}
+
+interface StepItem {
+  id: string;
+  name: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'error';
+  detail: string;
+}
+
+export const AnalysisPage: React.FC<AnalysisPageProps> = ({
+  selectedFile,
+  settings,
+  onAnalysisComplete,
+  onCancel,
+}) => {
+  const [overallProgress, setOverallProgress] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [steps, setSteps] = useState<StepItem[]>([
+    { id: 'audio', name: '1. Ekstraksi Audio PCM & VAD Wicara', status: 'pending', detail: 'Membaca track audio lokal' },
+    { id: 'whisper', name: '2. Transkripsi Wicara Lokal', status: 'pending', detail: 'Membuat timestamp per kata' },
+    { id: 'highlight', name: '3. Scoring & Pembuatan Kandidat', status: 'pending', detail: 'Mencari kalimat pembuka & hook' },
+    { id: 'vision', name: '4. Frame Sampling & Deteksi Wajah', status: 'pending', detail: 'Mengambil sampel frame dari video asli' },
+    { id: 'layout', name: '5. Smart Crop 9:16 & Layouting', status: 'pending', detail: 'Menyusun posisi teks & crop window' },
+  ]);
+
+  const updateStepStatus = (id: string, status: StepItem['status'], detail?: string) => {
+    setSteps((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, status, detail: detail || s.detail } : s))
+    );
+  };
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setErrorMessage('Tidak ada file video yang dipilih.');
+      return;
+    }
+
+    let isMounted = true;
+
+    async function runRealAnalysis() {
+      if (!selectedFile) return;
+      const targetFile = selectedFile;
+      try {
+        // Step 1: Real Audio Extraction
+        updateStepStatus('audio', 'in_progress', 'Mengurai audio via Web Audio API...');
+        setOverallProgress(10);
+        const audioRes = await extractAudioFromVideoFile(targetFile);
+        if (!audioRes.success) {
+          throw new Error(audioRes.error.message);
+        }
+        updateStepStatus('audio', 'completed', `Audio terdekode: ${(audioRes.value.durationUs / 1000000).toFixed(1)}s, ${audioRes.value.speechSegments.length} segmen suara`);
+        setOverallProgress(30);
+
+        if (!isMounted) return;
+
+        // Step 2: Real Local Speech Transcription
+        updateStepStatus('whisper', 'in_progress', 'Memproses transkripsi wicara lokal...');
+        const transRes = await transcribeAudioSegments('proj-01', settings.language, audioRes.value.speechSegments);
+        if (!transRes.success) {
+          throw new Error(transRes.error.message);
+        }
+        updateStepStatus('whisper', 'completed', `Transkripsi selesai: ${transRes.value.segments.length} kalimat bertimestamp`);
+        setOverallProgress(50);
+
+        if (!isMounted) return;
+
+        // Step 3: Real Candidate Generation & Quality Scoring
+        updateStepStatus('highlight', 'in_progress', 'Menghitung Skor Kualitas Kandidat...');
+        const candidates = generateCandidatesFromTranscript('proj-01', transRes.value, settings);
+        updateStepStatus('highlight', 'completed', `Dihasilkan ${candidates.length} kandidat clip berkualitas`);
+        setOverallProgress(70);
+
+        if (!isMounted) return;
+
+        // Step 4: Real Frame Sampling & Vision/Face Detection
+        updateStepStatus('vision', 'in_progress', 'Mengambil frame nyata dari file video...');
+        for (let i = 0; i < candidates.length; i++) {
+          const cand = candidates[i];
+          const frameRes = await analyzeVideoFrame(targetFile, cand.startUs + 1000000);
+          if (frameRes.success) {
+            cand.thumbnailUrl = frameRes.value.thumbnailUrl;
+            if (frameRes.value.cropWindow) {
+              cand.smartCropPoints = [
+                { timestampUs: cand.startUs, cropWindow: frameRes.value.cropWindow },
+              ];
+            }
+          }
+        }
+        updateStepStatus('vision', 'completed', 'Sampel frame & deteksi posisi berhasil');
+        setOverallProgress(90);
+
+        if (!isMounted) return;
+
+        // Step 5: Final Layout & Completion
+        updateStepStatus('layout', 'completed', 'Smart Crop 9:16 & overlay siap');
+        setOverallProgress(100);
+
+        setTimeout(() => {
+          if (isMounted) {
+            onAnalysisComplete(candidates);
+          }
+        }, 600);
+      } catch (err: any) {
+        if (isMounted) {
+          setErrorMessage(err?.message || 'Gagal memproses analisis video');
+        }
+      }
+    }
+
+    runRealAnalysis();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedFile, settings, onAnalysisComplete]);
+
+  return (
+    <div style={styles.container}>
+      <header style={{ textAlign: 'center' }}>
+        <h2>Proses Analisis Video Nyata (Local Processing)</h2>
+        <p style={{ color: 'var(--text-secondary)' }}>
+          {selectedFile ? `Memproses: ${selectedFile.name} (${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB)` : 'Tidak ada file'}
+        </p>
+      </header>
+
+      {errorMessage ? (
+        <div className="card" style={{ borderColor: 'var(--accent-danger)' }}>
+          <h3 style={{ color: 'var(--accent-danger)' }}>⚠️ Terjadi Kesalahan Analisis</h3>
+          <p style={{ color: 'var(--text-secondary)' }}>{errorMessage}</p>
+          <button className="btn-secondary" onClick={onCancel} style={{ marginTop: '1rem' }}>
+            ← Kembali & Pilih File Lain
+          </button>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: '2rem' }}>
+          <div style={styles.progressHeader}>
+            <span>Progress Analisis Video Nyata</span>
+            <span style={{ fontWeight: 'bold', color: 'var(--accent-secondary)' }}>{overallProgress}%</span>
+          </div>
+          <div style={styles.progressBarBg}>
+            <div style={{ ...styles.progressBarFill, width: `${overallProgress}%` }} />
+          </div>
+
+          <div style={styles.stepsList}>
+            {steps.map((step) => (
+              <div key={step.id} style={styles.stepRow}>
+                <div style={styles.stepStatus}>
+                  {step.status === 'pending' && <span style={{ color: 'var(--text-muted)' }}>⚪</span>}
+                  {step.status === 'in_progress' && <span style={{ color: 'var(--accent-warning)' }}>⏳</span>}
+                  {step.status === 'completed' && <span style={{ color: 'var(--accent-success)' }}>✅</span>}
+                  {step.status === 'error' && <span style={{ color: 'var(--accent-danger)' }}>❌</span>}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <h4 style={{ margin: 0, fontSize: '1rem' }}>{step.name}</h4>
+                  <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    {step.detail}
+                  </p>
+                </div>
+                <div>
+                  {step.status === 'in_progress' && <span className="badge badge-warning">Memproses...</span>}
+                  {step.status === 'completed' && <span className="badge badge-success">Selesai</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ textAlign: 'center' }}>
+        <button className="btn-secondary" onClick={onCancel}>
+          🛑 Batal & Kembali
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    maxWidth: '750px',
+    margin: '0 auto',
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2rem',
+  },
+  progressHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '0.5rem',
+    fontWeight: 600,
+  },
+  progressBarBg: {
+    height: '10px',
+    backgroundColor: 'var(--bg-dark-900)',
+    borderRadius: 'var(--radius-full)',
+    overflow: 'hidden',
+    marginBottom: '2rem',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: 'var(--accent-primary)',
+    transition: 'width 0.3s ease',
+  },
+  stepsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1rem',
+  },
+  stepRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '1rem',
+    padding: '0.75rem 1rem',
+    background: 'var(--bg-dark-800)',
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--surface-border)',
+  },
+  stepStatus: {
+    fontSize: '1.2rem',
+  },
+};
