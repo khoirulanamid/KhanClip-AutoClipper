@@ -48,6 +48,85 @@ button:disabled {
   opacity: 0.5;
 }
 
+/* Keyboard access: visible focus for interactive elements */
+button:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+input:focus-visible {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+/* Header navigation — underline indicator instead of filled pills */
+.nav-btn {
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 1.1rem 0.7rem;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.nav-btn:hover {
+  color: var(--text-primary);
+}
+
+.nav-btn-active {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--accent-primary);
+}
+
+/* Segmented control for input method selection */
+.nav-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.45rem 0.9rem;
+  border-radius: 7px;
+}
+
+.nav-segment:hover {
+  color: var(--text-secondary);
+}
+
+.nav-segment-active {
+  background: var(--bg-dark-600);
+  color: var(--text-primary);
+}
+
+/* Inline text link styled as a button */
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  padding: 0;
+  color: var(--accent-secondary);
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+/* Landing dropzone hover state */
+.dropzone:hover,
+.dropzone:focus-visible {
+  border-color: var(--accent-primary);
+  background: rgba(99, 102, 241, 0.04);
+}
+
 /* Common Layout Components */
 .app-container {
   display: flex;
@@ -75,6 +154,14 @@ button:disabled {
 
 .card:hover {
   border-color: var(--surface-border-accent);
+}
+
+.field-input {
+  font-family: var(--font-body);
+}
+
+.field-input::placeholder {
+  color: var(--text-muted);
 }
 
 .btn-primary {

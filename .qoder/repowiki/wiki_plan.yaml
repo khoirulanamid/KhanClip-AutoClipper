@@ -1,0 +1,21 @@
+version: 1
+
+scope:
+  include: []
+  exclude:
+    - "engine/**"
+
+repowiki:
+  template: architecture
+  notes:
+    - text: "EditFlow adalah static web app browser-only; seluruh pemrosesan video berjalan lokal di laptop pengguna tanpa backend/VPS. Jangan mendokumentasikan alur berbasis server."
+    - text: "Konvensi wajib: waktu internal dalam microseconds, geometry dalam koordinat ternormalisasi, dan tugas berat (transkripsi, analisis, render) selalu di worker — tidak pernah di main thread."
+    - text: "Alur produk resmi: analisis → preview → edit → render. Preview sebelum render adalah default; render hanya untuk kandidat yang dipilih pengguna; manual override selalu menang."
+    - text: "Semua error memakai tipe Result/AppError dan operasi async menerima AbortSignal; progress dilaporkan via event/callback."
+  documents: []
+
+knowledgecard:
+  notes:
+    - text: "Bagi kartu pengetahuan mengikuti lapisan folder src: domain, infrastructure, workers, pages/UI, styles. Jangan gabungkan lintas lapisan."
+    - text: "Domain tidak mengimpor React/DOM; infrastructure mengimplementasikan adapter/provider (whisper, audio extractor, vision detector, mp4 renderer, indexeddb); worker memakai protocol bertipe."
+    - text: "Folder engine/ (Python) berada di luar cakupan dan tidak boleh dirujuk oleh kartu pengetahuan."

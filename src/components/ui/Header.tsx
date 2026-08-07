@@ -22,8 +22,10 @@ export const Header: React.FC<HeaderProps> = ({ currentStep, onNavigateStep }) =
       <div style={styles.logoContainer} onClick={() => onNavigateStep('landing')} tabIndex={0} role="button">
         <div style={styles.logoBadge}>EF</div>
         <div>
-          <h1 style={styles.logoText}>EditFlow <span style={styles.subLogoText}>Auto Clipper</span></h1>
-          <p style={styles.tagline}>Local Browser-Only Clipper</p>
+          <h1 style={styles.logoText}>
+            EditFlow <span style={styles.subLogoText}>Auto Clipper</span>
+          </h1>
+          <p style={styles.tagline}>Local browser-only clipper</p>
         </div>
       </div>
 
@@ -34,10 +36,7 @@ export const Header: React.FC<HeaderProps> = ({ currentStep, onNavigateStep }) =
             <button
               key={step.id}
               onClick={() => onNavigateStep(step.id)}
-              style={{
-                ...styles.navButton,
-                ...(isActive ? styles.navButtonActive : {}),
-              }}
+              className={`nav-btn${isActive ? ' nav-btn-active' : ''}`}
               aria-current={isActive ? 'page' : undefined}
             >
               {step.label}
@@ -46,8 +45,9 @@ export const Header: React.FC<HeaderProps> = ({ currentStep, onNavigateStep }) =
         })}
       </nav>
 
-      <div style={styles.privacyBadge}>
-        <span className="badge badge-success">🔒 100% Local</span>
+      <div style={styles.statusBadge}>
+        <span style={styles.statusDot} />
+        100% Local
       </div>
     </header>
   );
@@ -58,67 +58,75 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '0.75rem 1.5rem',
-    backgroundColor: 'var(--bg-dark-800)',
-    borderBottom: '1px solid var(--surface-border)',
     gap: '1rem',
+    padding: '0 1.5rem',
+    minHeight: '56px',
+    backgroundColor: 'var(--bg-dark-900)',
+    borderBottom: '1px solid var(--surface-border)',
     flexWrap: 'wrap',
   },
   logoContainer: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.75rem',
+    gap: '0.65rem',
     cursor: 'pointer',
   },
   logoBadge: {
-    background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+    background: 'var(--accent-primary)',
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: '1.2rem',
-    width: '40px',
-    height: '40px',
+    fontWeight: 700,
+    fontSize: '0.75rem',
+    letterSpacing: '0.02em',
+    width: '30px',
+    height: '30px',
     borderRadius: '8px',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'content',
-    paddingLeft: '6px',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   logoText: {
-    fontSize: '1.1rem',
+    fontSize: '0.95rem',
+    fontWeight: 600,
     margin: 0,
-    lineHeight: 1.1,
+    lineHeight: 1.2,
   },
   subLogoText: {
-    color: 'var(--accent-secondary)',
-    fontWeight: 'normal',
+    color: 'var(--text-muted)',
+    fontWeight: 500,
   },
   tagline: {
-    fontSize: '0.7rem',
+    fontSize: '0.68rem',
     color: 'var(--text-muted)',
+    letterSpacing: '0.04em',
     margin: 0,
   },
   nav: {
     display: 'flex',
-    gap: '0.25rem',
+    alignItems: 'center',
+    gap: '0.125rem',
     overflowX: 'auto',
     maxWidth: '100%',
   },
-  navButton: {
-    background: 'transparent',
+  statusBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.45rem',
+    fontSize: '0.72rem',
+    fontWeight: 600,
+    letterSpacing: '0.03em',
     color: 'var(--text-secondary)',
-    fontSize: '0.85rem',
-    padding: '0.5rem 0.75rem',
-    borderRadius: 'var(--radius-sm)',
-    border: 'none',
+    border: '1px solid var(--surface-border)',
+    background: 'var(--bg-dark-800)',
+    padding: '0.3rem 0.75rem',
+    borderRadius: 'var(--radius-full)',
     whiteSpace: 'nowrap',
   },
-  navButtonActive: {
-    background: 'var(--bg-dark-600)',
-    color: 'var(--text-primary)',
-    fontWeight: 600,
-  },
-  privacyBadge: {
-    display: 'flex',
-    alignItems: 'center',
+  statusDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    background: 'var(--accent-success)',
+    display: 'inline-block',
   },
 };
