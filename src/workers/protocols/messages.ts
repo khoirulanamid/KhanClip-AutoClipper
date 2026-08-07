@@ -14,7 +14,10 @@ export interface BaseWorkerMessage {
 export interface StartTranscriptionRequest extends BaseWorkerMessage {
   type: 'START_TRANSCRIPTION';
   projectId: string;
+  /** Mono PCM audio samples (Float32) transferred as an ArrayBuffer. */
   audioBuffer: ArrayBuffer;
+  /** Sampling rate of audioBuffer in Hz (16000 expected by Whisper). */
+  sampleRate: number;
   language: string;
   modelProfile: 'eco' | 'balanced' | 'max';
 }

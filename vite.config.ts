@@ -10,6 +10,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Web Workers (Whisper transcription) ship as ES modules.
+  worker: {
+    format: 'es',
+  },
+  optimizeDeps: {
+    // transformers.js loads ONNX runtime assets dynamically; skip pre-bundling.
+    exclude: ['@huggingface/transformers'],
+  },
   server: {
     port: 3000,
     headers: {

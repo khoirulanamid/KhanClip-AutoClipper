@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { extractAudioFromVideoFile } from '@/infrastructure/media/audio/extractor';
-import { transcribeAudioSegments } from '@/infrastructure/media/transcription/whisper';
+import { resampleAudioTo16k, transcribeWithWorker } from '@/infrastructure/media/transcription/whisper';
 import { generateCandidatesFromTranscript } from '@/domain/candidate/generator';
 import { analyzeVideoFrame } from '@/infrastructure/media/vision/detector';
 import { Candidate } from '@/domain/candidate/types';
@@ -66,11 +66,27 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
 
         if (!isMounted) return;
 
-        // Step 2: Real Local Speech Recognition (Speech-to-Text)
-        updateStepStatus('whisper', 'in_progress', 'Menerjemahkan suara wicara video asli...');
-        const transRes = await transcribeAudioSegments('proj-01', settings.language, audioRes.value.speechSegments, targetFile);
+        // Step 2: Local Whisper transcription inside a Web Worker (off main thread).
+        updateStepStatus('whisper', 'in_progress', 'Menyiapkan audio 16kHz untuk Whisper...');
+        const audioBuffer = audioRes.value.audioBuffer;
+        const pcm16kMono = resampleAudioTo16k(
+          Array.from({ length: audioBuffer.numberOfChannels }, (_, ch) => audioBuffer.getChannelData(ch)),
+          audioBuffer.sampleRate
+        );
+
+        const transRes = await transcribeWithWorker(
+          'proj-01',
+          settings.language,
+          settings.performanceProfile,
+          pcm16kMono,
+          (percent, stageMessage) => {
+            if (!isMounted) return;
+            updateStepStatus('whisper', 'in_progress', stageMessage);
+            setOverallProgress(30 + Math.round(percent * 0.2));
+          }
+        );
         if (!transRes.success) {
-          throw new Error(transRes.error.message);
+          throw new Error(transRes.error.message + (transRes.error.suggestedFallback ? ` ${transRes.error.suggestedFallback}` : ''));
         }
         updateStepStatus('whisper', 'completed', `Transkripsi ucapan selesai: ${transRes.value.segments.length} segmen suara terdeteksi`);
         setOverallProgress(50);
