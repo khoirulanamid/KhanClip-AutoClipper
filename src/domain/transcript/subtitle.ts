@@ -1,5 +1,6 @@
 import {
   TranscriptWord,
+  TranscriptDocument,
   SubtitleWord,
   SubtitleCue,
   SubtitleTrack,
@@ -7,6 +8,11 @@ import {
 
 export const SECOND_US = 1_000_000;
 export const MILLISECOND_US = 1_000;
+
+/** Readable cue limits per SUBTITLE_FIX_SPEC.md §5.8 (2-7 words, break on punctuation/pause). */
+export const MIN_WORDS_PER_CUE = 2;
+export const MAX_WORDS_PER_CUE = 7;
+export const CUE_PAUSE_BREAK_US = 600_000;
 
 export function secondsToUs(seconds: number): number {
   return Math.round(seconds * SECOND_US);
@@ -46,35 +52,121 @@ export function getActiveWord(
 }
 
 /**
- * Groups individual subtitle words into readable phrase cues (2-7 words per cue).
+ * Groups individual subtitle words into readable phrase cues.
+ * A cue breaks at punctuation, at a long pause, or at MAX_WORDS_PER_CUE;
+ * single-word leftovers are merged into the previous cue when it stays readable.
  */
 export function groupWordsIntoReadableCues(words: SubtitleWord[]): SubtitleCue[] {
   if (!words || words.length === 0) return [];
 
-  const cues: SubtitleCue[] = [];
-  const targetWordsPerCue = 4;
+  const raw: SubtitleWord[][] = [];
+  let current: SubtitleWord[] = [];
 
-  for (let i = 0; i < words.length; i += targetWordsPerCue) {
-    const cueWords = words.slice(i, i + targetWordsPerCue);
-    if (cueWords.length === 0) continue;
+  const flush = () => {
+    if (current.length > 0) {
+      raw.push(current);
+      current = [];
+    }
+  };
 
-    const sourceStartUs = cueWords[0].sourceStartUs;
-    const sourceEndUs = cueWords[cueWords.length - 1].sourceEndUs;
-    const localStartUs = cueWords[0].localStartUs;
-    const localEndUs = cueWords[cueWords.length - 1].localEndUs;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    current.push(word);
 
-    cues.push({
-      id: `cue-${i / targetWordsPerCue + 1}`,
-      words: cueWords,
-      text: cueWords.map((w) => w.text).join(' '),
-      sourceStartUs,
-      sourceEndUs,
-      localStartUs,
-      localEndUs,
-    });
+    const endsWithPunctuation = /[.!?,;:…]$/.test(word.text);
+    const nextWord = words[i + 1];
+    const hasLongPause = nextWord
+      ? nextWord.localStartUs - word.localEndUs > CUE_PAUSE_BREAK_US
+      : false;
+
+    if (current.length >= MAX_WORDS_PER_CUE || endsWithPunctuation || hasLongPause) {
+      flush();
+    }
+  }
+  flush();
+
+  // Avoid leaving a short single-word cue behind.
+  const merged: SubtitleWord[][] = [];
+  for (const cueWords of raw) {
+    const prev = merged[merged.length - 1];
+    if (
+      cueWords.length < MIN_WORDS_PER_CUE &&
+      prev &&
+      prev.length + cueWords.length <= MAX_WORDS_PER_CUE
+    ) {
+      prev.push(...cueWords);
+    } else {
+      merged.push([...cueWords]);
+    }
   }
 
-  return cues;
+  return merged.map((cueWords, idx) => ({
+    id: `cue-${idx + 1}`,
+    words: cueWords,
+    text: cueWords.map((w) => w.text).join(' '),
+    sourceStartUs: cueWords[0].sourceStartUs,
+    sourceEndUs: cueWords[cueWords.length - 1].sourceEndUs,
+    localStartUs: cueWords[0].localStartUs,
+    localEndUs: cueWords[cueWords.length - 1].localEndUs,
+  }));
+}
+
+/**
+ * Flattens a transcript's per-segment word timestamps into TranscriptWords,
+ * filtered to the candidate window. Timestamps stay in source video time;
+ * rebasing to local clip time happens in buildCandidateSubtitleTrack.
+ */
+export function extractTranscriptWords(
+  doc: TranscriptDocument,
+  startUs: number,
+  endUs: number
+): TranscriptWord[] {
+  const result: TranscriptWord[] = [];
+  let index = 0;
+
+  for (const segment of doc.segments) {
+    for (const w of segment.words) {
+      if (w.endUs <= startUs || w.startUs >= endUs) continue;
+      result.push({
+        id: `tw-${segment.id}-${index++}`,
+        text: w.word,
+        sourceStartUs: w.startUs,
+        sourceEndUs: w.endUs,
+        confidence: w.confidence,
+        timingPrecision: 'segment-derived',
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Fallback word timing estimator: distributes words evenly across the window.
+ * Used only when real timestamps are unavailable (e.g. user-edited text);
+ * words are explicitly labeled 'estimated'.
+ */
+export function estimateWordsFromText(
+  text: string,
+  startUs: number,
+  endUs: number,
+  idPrefix = 'est-w'
+): TranscriptWord[] {
+  const parts = text.split(/\s+/).filter(Boolean);
+  if (parts.length === 0 || endUs <= startUs) return [];
+
+  const durUs = Math.max(200_000, Math.round((endUs - startUs) / parts.length));
+
+  return parts.map((word, idx) => {
+    const srcStart = startUs + idx * durUs;
+    return {
+      id: `${idPrefix}-${idx}`,
+      text: word,
+      sourceStartUs: srcStart,
+      sourceEndUs: Math.min(endUs, srcStart + durUs),
+      timingPrecision: 'estimated' as const,
+    };
+  });
 }
 
 /**

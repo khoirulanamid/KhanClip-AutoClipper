@@ -4,6 +4,7 @@ import {
   buildCandidateSubtitleTrack,
   getActiveSubtitleCue,
   getActiveWord,
+  estimateWordsFromText,
   usToSeconds,
   secondsToUs,
 } from '@/domain/transcript/subtitle';
@@ -33,12 +34,16 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
   const [headline, setHeadline] = useState(currentCandidate?.headline || '');
   const [subtitleText, setSubtitleText] = useState(currentCandidate?.transcriptText || '');
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitlePresetStyle>('kinetic');
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitlePresetStyle>(
+    currentCandidate?.subtitleStyle ?? 'kinetic'
+  );
   const [layout, setLayout] = useState(currentCandidate?.selectedLayout || 'smart_editorial');
   const [showSafeArea, setShowSafeArea] = useState(true);
   const [startUs, setStartUs] = useState(currentCandidate?.startUs || 0);
   const [endUs, setEndUs] = useState(currentCandidate?.endUs || 30000000);
-  const [globalOffsetMs, setGlobalOffsetMs] = useState(0); // -500ms to +500ms
+  const [globalOffsetMs, setGlobalOffsetMs] = useState(
+    Math.round((currentCandidate?.globalOffsetUs ?? 0) / 1000)
+  ); // -500ms to +500ms
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTranscribingLive, setIsTranscribingLive] = useState(false);
   const [transcriptionDone, setTranscriptionDone] = useState(true);
@@ -53,21 +58,17 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     };
   }, [selectedFile]);
 
-  // Build strict transcript words and track rebased to localStartUs = sourceStartUs - candidateStartUs
-  const transcriptWords: TranscriptWord[] = (subtitleText || headline || '')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word, idx, arr) => {
-      const durUs = Math.max(200_000, Math.round((endUs - startUs) / Math.max(1, arr.length)));
-      const srcStart = startUs + idx * durUs;
-      return {
-        id: `w-${idx}`,
-        text: word,
-        sourceStartUs: srcStart,
-        sourceEndUs: Math.min(endUs, srcStart + durUs),
-        timingPrecision: 'word-native',
-      };
-    });
+  // Real per-word timestamps flow from the candidate. buildCandidateSubtitleTrack
+  // re-filters and rebases them on every trim change (no re-transcription needed).
+  // Only when the user edits the text away from the transcript do we fall back to
+  // evenly estimated timing, explicitly labeled 'estimated'.
+  const hasRealTiming =
+    (currentCandidate?.transcriptWords?.length ?? 0) > 0 &&
+    subtitleText.trim() === (currentCandidate?.transcriptText || '').trim();
+
+  const transcriptWords: TranscriptWord[] = hasRealTiming
+    ? currentCandidate!.transcriptWords!
+    : estimateWordsFromText(subtitleText || headline || '', startUs, endUs, 'w');
 
   const subtitleTrack: SubtitleTrack = buildCandidateSubtitleTrack(
     transcriptWords,
@@ -81,6 +82,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     setHeadline(cand.headline);
     setSubtitleText(cand.transcriptText || '');
     setLayout(cand.selectedLayout);
+    setSubtitleStyle(cand.subtitleStyle ?? 'kinetic');
+    setGlobalOffsetMs(Math.round((cand.globalOffsetUs ?? 0) / 1000));
     setStartUs(cand.startUs);
     setEndUs(cand.endUs);
 
@@ -234,6 +237,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({
       startUs,
       endUs,
       durationUs: endUs - startUs,
+      subtitleStyle,
+      globalOffsetUs: globalOffsetMs * 1000,
       manualOverride: true,
     });
     alert('Perubahan subtitle dan timing berhasil disimpan!');

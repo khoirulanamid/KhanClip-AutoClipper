@@ -5,6 +5,7 @@ import {
   buildCandidateSubtitleTrack,
   getActiveSubtitleCue,
   getActiveWord,
+  estimateWordsFromText,
   secondsToUs,
 } from '@/domain/transcript/subtitle';
 import { TranscriptWord } from '@/domain/transcript/types';
@@ -27,23 +28,25 @@ export async function renderCandidateToMp4(
     const fps = 30;
     const totalFrames = Math.round(durationSec * fps);
 
-    // Build strict transcript track using shared subtitle system
-    const transcriptWords: TranscriptWord[] = (candidate.transcriptText || candidate.headline || '')
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((word: string, idx: number, arr: string[]) => {
-        const durUs = Math.max(200_000, Math.round((candidate.endUs - candidate.startUs) / Math.max(1, arr.length)));
-        const srcStart = candidate.startUs + idx * durUs;
-        return {
-          id: `render-w-${idx}`,
-          text: word,
-          sourceStartUs: srcStart,
-          sourceEndUs: Math.min(candidate.endUs, srcStart + durUs),
-          timingPrecision: 'word-native' as const,
-        };
-      });
+    // Subtitle track with full preview parity: real per-word timestamps from the
+    // candidate when they still match the (possibly edited) transcript text,
+    // otherwise evenly estimated timing. Style and global offset come from the
+    // candidate so the render matches what the user previewed.
+    const candidateText = (candidate.transcriptText || candidate.headline || '').trim();
+    const realWords = candidate.transcriptWords ?? [];
+    const wordsMatchText =
+      realWords.length > 0 && realWords.map((w) => w.text).join(' ') === candidateText;
 
-    const subtitleTrack = buildCandidateSubtitleTrack(transcriptWords, candidate.startUs, candidate.endUs, 0);
+    const transcriptWords: TranscriptWord[] = wordsMatchText
+      ? realWords
+      : estimateWordsFromText(candidateText, candidate.startUs, candidate.endUs, 'render-w');
+
+    const subtitleTrack = buildCandidateSubtitleTrack(
+      transcriptWords,
+      candidate.startUs,
+      candidate.endUs,
+      candidate.globalOffsetUs ?? 0
+    );
 
     const canvas = document.createElement('canvas');
     canvas.width = 1080;
@@ -75,7 +78,7 @@ export async function renderCandidateToMp4(
 
     recorder.start();
 
-    const presetStyle: SubtitlePresetStyle = 'kinetic';
+    const presetStyle: SubtitlePresetStyle = candidate.subtitleStyle ?? 'kinetic';
 
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       const frameTimeSec = frameIndex / fps;

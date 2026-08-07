@@ -1,6 +1,7 @@
 import { Candidate, CandidateScore } from './types';
 import { TranscriptDocument } from '@/domain/transcript/types';
 import { ProjectSettings } from '@/domain/project/types';
+import { extractTranscriptWords } from '@/domain/transcript/subtitle';
 
 // Knowledge & Educational Insight Keywords
 const KNOWLEDGE_KEYWORDS = [
@@ -109,6 +110,7 @@ export function generateCandidatesFromTranscript(
           title: `Clip ${candIndex.toString().padStart(2, '0')}: ${headlineText.slice(0, 30)}...`,
           headline: headlineText,
           transcriptText: fullText,
+          transcriptWords: extractTranscriptWords(transcript, currentStart, currentEnd),
           keywords: keywords.length > 0 ? keywords : ['ilmu', 'edukasi', 'insight'],
           startUs: currentStart,
           endUs: currentEnd,
@@ -158,6 +160,7 @@ export function generateCandidatesFromTranscript(
       title: `Clip ${candIndex.toString().padStart(2, '0')}: ${headlineText.slice(0, 30)}...`,
       headline: headlineText,
       transcriptText: fullText,
+      transcriptWords: extractTranscriptWords(transcript, currentStart, currentEnd),
       keywords: ['kesimpulan', 'ilmu', 'edukasi'],
       startUs: currentStart,
       endUs: currentEnd,

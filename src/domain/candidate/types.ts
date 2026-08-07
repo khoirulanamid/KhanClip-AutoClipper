@@ -1,3 +1,6 @@
+import { TranscriptWord } from '@/domain/transcript/types';
+import { SubtitlePresetStyle } from '@/domain/render/canvas_overlay';
+
 /**
  * BoundingBox in normalized coordinates [0..1]
  */
@@ -29,6 +32,11 @@ export interface Candidate {
   title: string;
   headline: string;
   transcriptText: string;
+  /**
+   * Per-word source timestamps for this candidate's window. Preview and
+   * renderer must consume these instead of re-synthesizing timing.
+   */
+  transcriptWords?: TranscriptWord[];
   keywords: string[];
   startUs: number;
   endUs: number;
@@ -40,4 +48,8 @@ export interface Candidate {
   thumbnailUrl?: string;
   selectedForRender: boolean;
   manualOverride: boolean;
+  /** Subtitle preset chosen in the editor; render must match preview. */
+  subtitleStyle?: SubtitlePresetStyle;
+  /** Global subtitle offset in microseconds (-500ms..+500ms). */
+  globalOffsetUs?: number;
 }
