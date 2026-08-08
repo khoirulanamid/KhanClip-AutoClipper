@@ -12,6 +12,79 @@ const KNOWLEDGE_KEYWORDS = [
 ];
 
 /**
+ * Builds the single clip candidate for the user-configured minute window.
+ * The clip boundaries are exactly the requested range; the transcript inside
+ * the window only feeds the headline, keywords, and quality score.
+ */
+export function buildWindowCandidate(
+  projectId: string,
+  transcript: TranscriptDocument,
+  startUs: number,
+  endUs: number,
+  settings: ProjectSettings
+): Candidate {
+  const windowSegments = transcript.segments.filter(
+    (s) => s.endUs > startUs && s.startUs < endUs
+  );
+  const fullText = windowSegments.map((s) => s.text).join(' ').trim();
+  const words = fullText.toLowerCase().split(/\s+/).filter(Boolean);
+  const matchedKnowledgeWords = words.filter((w) =>
+    KNOWLEDGE_KEYWORDS.some((kw) => w.includes(kw))
+  );
+
+  const durationUs = Math.max(1, endUs - startUs);
+  const startMinute = Math.floor(startUs / 60_000_000);
+  const endMinute = Math.max(startMinute + 1, Math.ceil(endUs / 60_000_000));
+
+  const mainWords = fullText.split(/\s+/).filter((w) => w.length > 3);
+  const headline =
+    mainWords.length > 0
+      ? mainWords.slice(0, 4).join(' ')
+      : `Clip menit ${startMinute}–${endMinute}`;
+
+  const hookScore = Math.min(95, 70 + matchedKnowledgeWords.length * 3);
+  const flowScore = Math.min(95, 80 + Math.min(15, Math.round(durationUs / 60_000_000)));
+  const clarityScore = windowSegments.length > 0 ? 88 : 70;
+  const totalScore = Math.round(hookScore * 0.4 + flowScore * 0.3 + clarityScore * 0.3);
+
+  return {
+    id: 'cand-window-1',
+    projectId,
+    title: `Clip menit ${startMinute}–${endMinute}`,
+    headline,
+    transcriptText: fullText,
+    transcriptWords: settings.autoSubtitles
+      ? extractTranscriptWords(transcript, startUs, endUs)
+      : [],
+    keywords:
+      matchedKnowledgeWords.length > 0
+        ? Array.from(new Set(matchedKnowledgeWords)).slice(0, 4)
+        : ['clip', 'video'],
+    startUs,
+    endUs,
+    durationUs,
+    score: {
+      totalScore,
+      hookScore,
+      flowScore,
+      clarityScore,
+      relevanceScore: Math.round((hookScore + flowScore) / 2),
+      reasons: [
+        `Rentang menit ${startMinute}–${endMinute} dipilih manual oleh pengguna`,
+        `${windowSegments.length} segmen ucapan terdeteksi di dalam rentang`,
+      ],
+    },
+    recommendedLayout: settings.layoutTemplate,
+    selectedLayout: settings.layoutTemplate,
+    smartCropPoints: [
+      { timestampUs: startUs, cropWindow: { x: 0.25, y: 0.1, width: 0.5, height: 0.8 } },
+    ],
+    selectedForRender: true,
+    manualOverride: true,
+  };
+}
+
+/**
  * Knowledge & Educational Insight Candidate Generator.
  * Filters audio narrative for educational value, knowledge density, and impactful hooks.
  * Disqualifies filler or random chatter.

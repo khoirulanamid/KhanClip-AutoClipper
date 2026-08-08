@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { extractAudioFromVideoFile } from '@/infrastructure/media/audio/extractor';
 import { resampleAudioTo16k, transcribeWithWorker } from '@/infrastructure/media/transcription/whisper';
 import { loadCloudTranscriptionConfig, transcribeWithCloudApi } from '@/infrastructure/media/transcription/cloud';
-import { generateCandidatesFromTranscript } from '@/domain/candidate/generator';
+import { buildWindowCandidate } from '@/domain/candidate/generator';
 import { analyzeVideoFrame } from '@/infrastructure/media/vision/detector';
 import { localStorageAdapter, transcriptCacheId } from '@/infrastructure/storage/indexeddb';
 import { Candidate } from '@/domain/candidate/types';
@@ -34,7 +34,7 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
   const [steps, setSteps] = useState<StepItem[]>([
     { id: 'audio', name: '1. Ekstraksi Audio PCM & VAD Wicara', status: 'pending', detail: 'Membaca track audio lokal' },
     { id: 'whisper', name: '2. Pengenal Suara Wicara Asli (Speech-to-Text)', status: 'pending', detail: 'Menerjemahkan ucapan suara video' },
-    { id: 'highlight', name: '3. Scoring & Pembuatan Kandidat Ilmu', status: 'pending', detail: 'Mencari kalimat pembuka & hook' },
+    { id: 'highlight', name: '3. Pembuatan Clip Rentang Menit', status: 'pending', detail: 'Menyusun clip sesuai rentang menit pilihan' },
     { id: 'vision', name: '4. Frame Sampling & Deteksi Wajah', status: 'pending', detail: 'Mengambil sampel frame dari video asli' },
     { id: 'layout', name: '5. Smart Crop 9:16 & Layouting', status: 'pending', detail: 'Menyusun posisi teks & crop window' },
   ]);
@@ -150,14 +150,20 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
 
         if (!isMounted) return;
 
-        // Step 3: Real Candidate Generation & Quality Scoring (window only)
-        updateStepStatus('highlight', 'in_progress', 'Menhitung Skor Kualitas & Poin Ilmu...');
+        // Step 3: Build the single clip for the configured minute window
+        updateStepStatus('highlight', 'in_progress', 'Menyusun clip sesuai rentang menit...');
         const windowedTranscript: TranscriptDocument = {
           ...transcript,
           segments: transcript.segments.filter((s) => s.endUs > windowStartUs && s.startUs < windowEndUs),
         };
-        const candidates = generateCandidatesFromTranscript('proj-01', windowedTranscript, settings);
-        updateStepStatus('highlight', 'completed', `Dihasilkan ${candidates.length} kandidat clip berkualitas`);
+        const candidates: Candidate[] = [
+          buildWindowCandidate('proj-01', windowedTranscript, windowStartUs, windowEndUs, settings),
+        ];
+        updateStepStatus(
+          'highlight',
+          'completed',
+          `Clip menit ${settings.clipStartMinute}–${settings.clipEndMinute > 0 ? settings.clipEndMinute : 'akhir'} siap (skor ${candidates[0].score.totalScore})`
+        );
         setOverallProgress(70);
 
         if (!isMounted) return;

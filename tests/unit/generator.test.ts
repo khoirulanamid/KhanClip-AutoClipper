@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateCandidatesFromTranscript } from '@/domain/candidate/generator';
+import { generateCandidatesFromTranscript, buildWindowCandidate } from '@/domain/candidate/generator';
 import { TranscriptDocument } from '@/domain/transcript/types';
 import { ProjectSettings } from '@/domain/project/types';
 
@@ -93,5 +93,28 @@ describe('Candidate Generator — real word timestamp flow', () => {
     for (const cand of candidates) {
       expect(cand.transcriptWords).toEqual([]);
     }
+  });
+});
+
+describe('buildWindowCandidate — single clip for the minute window', () => {
+  it('uses exactly the requested window boundaries', () => {
+    const cand = buildWindowCandidate('proj-gen', buildTranscript(), 5_000_000, 30_000_000, settings);
+
+    expect(cand.startUs).toBe(5_000_000);
+    expect(cand.endUs).toBe(30_000_000);
+    expect(cand.durationUs).toBe(25_000_000);
+    expect(cand.selectedForRender).toBe(true);
+    expect(cand.score.totalScore).toBeGreaterThanOrEqual(0);
+    expect(cand.score.totalScore).toBeLessThanOrEqual(100);
+    expect(cand.score.reasons.length).toBeGreaterThan(0);
+  });
+
+  it('keeps transcriptWords empty when autoSubtitles is off', () => {
+    const cand = buildWindowCandidate('proj-gen', buildTranscript(), 0, 40_000_000, {
+      ...settings,
+      autoSubtitles: false,
+    });
+
+    expect(cand.transcriptWords).toEqual([]);
   });
 });

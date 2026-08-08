@@ -33,9 +33,9 @@ export const CandidateGalleryPage: React.FC<CandidateGalleryPageProps> = ({
     <div style={styles.container}>
       <header style={styles.header}>
         <div>
-          <h2>Galeri Kandidat Video Vertikal ({candidates.length} Hasil)</h2>
+          <h2>Hasil Clip ({candidates.length})</h2>
           <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-            Pilih kandidat yang ingin dirender, atau buka Editor 9:16 untuk melakukan koreksi manual.
+            Tinjau clip sesuai rentang menit Anda. Buka Editor 9:16 untuk koreksi manual, lalu render.
           </p>
         </div>
 
@@ -44,7 +44,7 @@ export const CandidateGalleryPage: React.FC<CandidateGalleryPageProps> = ({
           disabled={selectedCount === 0}
           onClick={() => onProceedToRenderQueue(candidates.filter((c) => c.selectedForRender).map((c) => c.id))}
         >
-          Render {selectedCount} Kandidat Terpilih →
+          Render {selectedCount} Clip Terpilih →
         </button>
       </header>
 
@@ -113,7 +113,7 @@ export const CandidateGalleryPage: React.FC<CandidateGalleryPageProps> = ({
                   style={{ flex: 1, fontSize: '0.85rem' }}
                   onClick={() => onSelectCandidateToEdit(item.id)}
                 >
-                  ✏️ Edit Kandidat 9:16
+                  ✏️ Edit Clip 9:16
                 </button>
               </div>
             </div>
