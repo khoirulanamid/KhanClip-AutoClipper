@@ -21,6 +21,7 @@ interface DownloadProgress {
 // library's union return type is awkward inside a worker.
 let transcriber: any = null;
 let loadedModelId = '';
+let loadedBackend = '';
 
 // Model download sources, tried in order. The Hugging Face hub is primary;
 // hf-mirror.com is a full URL-compatible mirror used automatically when the
@@ -34,30 +35,33 @@ const post = (message: WorkerResponse): void => {
 
 /**
  * Creates the ASR pipeline with automatic device fallback:
- * WebGPU (fast) -> WASM/CPU (universal). Runs on every device.
+ * WebGPU fp16 (fastest) -> WebGPU fp32 (universal GPU) -> WASM/CPU (universal).
+ * Runs on every device.
  */
 async function createTranscriber(
   modelId: string,
   onDownloadProgress: (p: DownloadProgress) => void
-): Promise<any> {
+): Promise<{ pipe: any; backend: string }> {
   const hasWebGPU = typeof navigator !== 'undefined' && !!(navigator as any).gpu;
-  const attempts: { device: 'webgpu' | 'wasm'; dtype: unknown }[] = hasWebGPU
+  const attempts: { device: 'webgpu' | 'wasm'; dtype: unknown; backend: string }[] = hasWebGPU
     ? [
-        { device: 'webgpu', dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' } },
-        { device: 'wasm', dtype: 'q8' },
+        { device: 'webgpu', dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' }, backend: 'WebGPU (fp16)' },
+        { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' }, backend: 'WebGPU (fp32)' },
+        { device: 'wasm', dtype: 'q8', backend: 'WASM/CPU' },
       ]
-    : [{ device: 'wasm', dtype: 'q8' }];
+    : [{ device: 'wasm', dtype: 'q8', backend: 'WASM/CPU' }];
 
   let lastError: unknown = null;
   for (const attempt of attempts) {
     try {
-      return await pipeline('automatic-speech-recognition', modelId, {
+      const pipe = await pipeline('automatic-speech-recognition', modelId, {
         device: attempt.device,
         dtype: attempt.dtype,
         progress_callback: onDownloadProgress,
       } as any);
+      return { pipe, backend: attempt.backend };
     } catch (err) {
-      lastError = err; // fall through to WASM
+      lastError = err; // fall through to the next backend
     }
   }
   throw lastError;
@@ -70,8 +74,8 @@ async function createTranscriber(
 async function getTranscriber(
   modelId: string,
   onDownloadProgress: (p: DownloadProgress) => void
-): Promise<any> {
-  if (transcriber && loadedModelId === modelId) return transcriber;
+): Promise<{ pipe: any; backend: string }> {
+  if (transcriber && loadedModelId === modelId) return { pipe: transcriber, backend: loadedBackend };
 
   if (transcriber && typeof transcriber.dispose === 'function') {
     await transcriber.dispose();
@@ -82,9 +86,11 @@ async function getTranscriber(
   for (const host of MODEL_SOURCES) {
     env.remoteHost = host;
     try {
-      transcriber = await createTranscriber(modelId, onDownloadProgress);
+      const created = await createTranscriber(modelId, onDownloadProgress);
+      transcriber = created.pipe;
       loadedModelId = modelId;
-      return transcriber;
+      loadedBackend = created.backend;
+      return created;
     } catch (err) {
       lastError = err; // fall through to the mirror source
     }
@@ -114,7 +120,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     sendProgress(5, 'Menyiapkan model Whisper lokal...');
 
     let lastPercent = 5;
-    const transcribe = await getTranscriber(modelId, (p: DownloadProgress) => {
+    const { pipe: transcribe, backend } = await getTranscriber(modelId, (p: DownloadProgress) => {
       if (p.status === 'initiate') {
         sendProgress(lastPercent, `Mengunduh model ${p.file ?? ''} (di-cache untuk pemakaian offline)...`);
       } else if (p.status === 'progress' && typeof p.progress === 'number') {
@@ -129,7 +135,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       }
     });
 
-    sendProgress(50, 'Mentranskripsi audio dengan Whisper (sepenuhnya lokal)...');
+    sendProgress(50, `Model siap via ${backend}. Mentranskripsi audio dengan Whisper (sepenuhnya lokal)...`);
 
     const whisperLanguage = mapLanguageToWhisper(msg.language);
     const transcribeOptions = {

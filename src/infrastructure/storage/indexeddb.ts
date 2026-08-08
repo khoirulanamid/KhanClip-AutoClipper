@@ -92,6 +92,22 @@ export class LocalStorageAdapter {
     }
   }
 
+  async getTranscript(id: string): Promise<Result<TranscriptDocument | null>> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('transcripts', 'readonly');
+        const store = tx.objectStore('transcripts');
+        const req = store.get(id);
+        req.onsuccess = () => resolve(Ok(req.result || null));
+        req.onerror = () =>
+          resolve(Err(createAppError('STORAGE_READ_FAILED', 'Gagal membaca transkrip dari IndexedDB')));
+      });
+    } catch (err: any) {
+      return Err(createAppError('STORAGE_ERROR', err?.message || 'Error IndexedDB'));
+    }
+  }
+
   async saveCandidates(candidates: Candidate[]): Promise<Result<void>> {
     try {
       const db = await this.getDB();
@@ -145,3 +161,16 @@ export class LocalStorageAdapter {
 }
 
 export const localStorageAdapter = new LocalStorageAdapter();
+
+/**
+ * Stable cache key for a transcript derived from the source file identity,
+ * so re-analyzing the same file reuses the cached Whisper result instantly.
+ */
+export function transcriptCacheId(file: { name: string; size: number; lastModified: number }): string {
+  const signature = `${file.name}|${file.size}|${file.lastModified}`;
+  let hash = 5381;
+  for (let i = 0; i < signature.length; i++) {
+    hash = ((hash << 5) + hash + signature.charCodeAt(i)) | 0;
+  }
+  return `trans-cache-${(hash >>> 0).toString(16)}`;
+}

@@ -3,8 +3,10 @@ import { extractAudioFromVideoFile } from '@/infrastructure/media/audio/extracto
 import { resampleAudioTo16k, transcribeWithWorker } from '@/infrastructure/media/transcription/whisper';
 import { generateCandidatesFromTranscript } from '@/domain/candidate/generator';
 import { analyzeVideoFrame } from '@/infrastructure/media/vision/detector';
+import { localStorageAdapter, transcriptCacheId } from '@/infrastructure/storage/indexeddb';
 import { Candidate } from '@/domain/candidate/types';
 import { ProjectSettings } from '@/domain/project/types';
+import { TranscriptDocument } from '@/domain/transcript/types';
 
 interface AnalysisPageProps {
   selectedFile: File | null;
@@ -71,36 +73,50 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
         if (!isMounted) return;
 
         // Step 2: Local Whisper transcription inside a Web Worker (off main thread).
-        updateStepStatus('whisper', 'in_progress', 'Menyiapkan audio 16kHz untuk Whisper...');
-        const audioBuffer = audioRes.value.audioBuffer;
-        const pcm16kMono = resampleAudioTo16k(
-          Array.from({ length: audioBuffer.numberOfChannels }, (_, ch) => audioBuffer.getChannelData(ch)),
-          audioBuffer.sampleRate
-        );
+        // Same file re-analyzed? Reuse the cached transcript and skip Whisper entirely.
+        updateStepStatus('whisper', 'in_progress', 'Memeriksa cache transkrip lokal...');
+        const cacheId = transcriptCacheId(targetFile);
+        const cachedRes = await localStorageAdapter.getTranscript(cacheId);
+        const cachedDoc = cachedRes.success ? cachedRes.value : null;
 
-        const transRes = await transcribeWithWorker(
-          'proj-01',
-          settings.language,
-          settings.performanceProfile,
-          pcm16kMono,
-          audioRes.value.speechSegments,
-          (percent, stageMessage) => {
-            if (!isMounted) return;
-            updateStepStatus('whisper', 'in_progress', stageMessage);
-            setOverallProgress(30 + Math.round(percent * 0.2));
+        let transcript: TranscriptDocument;
+        if (cachedDoc && cachedDoc.segments.length > 0) {
+          transcript = cachedDoc;
+          updateStepStatus('whisper', 'completed', `Transkrip dimuat dari cache lokal (${transcript.segments.length} segmen) — Whisper dilewati`);
+        } else {
+          updateStepStatus('whisper', 'in_progress', 'Menyiapkan audio 16kHz untuk Whisper...');
+          const audioBuffer = audioRes.value.audioBuffer;
+          const pcm16kMono = resampleAudioTo16k(
+            Array.from({ length: audioBuffer.numberOfChannels }, (_, ch) => audioBuffer.getChannelData(ch)),
+            audioBuffer.sampleRate
+          );
+
+          const transRes = await transcribeWithWorker(
+            'proj-01',
+            settings.language,
+            settings.performanceProfile,
+            pcm16kMono,
+            audioRes.value.speechSegments,
+            (percent, stageMessage) => {
+              if (!isMounted) return;
+              updateStepStatus('whisper', 'in_progress', stageMessage);
+              setOverallProgress(30 + Math.round(percent * 0.2));
+            }
+          );
+          if (!transRes.success) {
+            throw new Error(transRes.error.message + (transRes.error.suggestedFallback ? ` ${transRes.error.suggestedFallback}` : ''));
           }
-        );
-        if (!transRes.success) {
-          throw new Error(transRes.error.message + (transRes.error.suggestedFallback ? ` ${transRes.error.suggestedFallback}` : ''));
+          transcript = transRes.value;
+          void localStorageAdapter.saveTranscript({ ...transcript, id: cacheId });
+          updateStepStatus('whisper', 'completed', `Transkripsi ucapan selesai: ${transcript.segments.length} segmen suara terdeteksi`);
         }
-        updateStepStatus('whisper', 'completed', `Transkripsi ucapan selesai: ${transRes.value.segments.length} segmen suara terdeteksi`);
         setOverallProgress(50);
 
         if (!isMounted) return;
 
         // Step 3: Real Candidate Generation & Quality Scoring
         updateStepStatus('highlight', 'in_progress', 'Menhitung Skor Kualitas & Poin Ilmu...');
-        const candidates = generateCandidatesFromTranscript('proj-01', transRes.value, settings);
+        const candidates = generateCandidatesFromTranscript('proj-01', transcript, settings);
         updateStepStatus('highlight', 'completed', `Dihasilkan ${candidates.length} kandidat clip berkualitas`);
         setOverallProgress(70);
 
