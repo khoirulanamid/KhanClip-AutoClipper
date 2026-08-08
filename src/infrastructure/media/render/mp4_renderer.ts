@@ -28,18 +28,21 @@ export async function renderCandidateToMp4(
     const fps = 30;
     const totalFrames = Math.round(durationSec * fps);
 
-    // Subtitle track with full preview parity: real per-word timestamps from the
-    // candidate when they still match the (possibly edited) transcript text,
-    // otherwise evenly estimated timing. Style and global offset come from the
-    // candidate so the render matches what the user previewed.
+    // Subtitle track with full preview parity: real per-word timestamps from
+    // the candidate when they still match the (possibly edited) transcript
+    // text, otherwise evenly estimated timing. An empty transcriptWords list
+    // means auto-subtitles are OFF: no subtitle cues are built or burned.
     const candidateText = (candidate.transcriptText || candidate.headline || '').trim();
     const realWords = candidate.transcriptWords ?? [];
     const wordsMatchText =
       realWords.length > 0 && realWords.map((w) => w.text).join(' ') === candidateText;
 
-    const transcriptWords: TranscriptWord[] = wordsMatchText
-      ? realWords
-      : estimateWordsFromText(candidateText, candidate.startUs, candidate.endUs, 'render-w');
+    const transcriptWords: TranscriptWord[] =
+      realWords.length === 0
+        ? []
+        : wordsMatchText
+          ? realWords
+          : estimateWordsFromText(candidateText, candidate.startUs, candidate.endUs, 'render-w');
 
     const subtitleTrack = buildCandidateSubtitleTrack(
       transcriptWords,

@@ -62,13 +62,17 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   // re-filters and rebases them on every trim change (no re-transcription needed).
   // Only when the user edits the text away from the transcript do we fall back to
   // evenly estimated timing, explicitly labeled 'estimated'.
+  // Empty transcriptWords means auto-subtitles are OFF: preview shows no cues.
+  const subtitlesEnabled = (currentCandidate?.transcriptWords?.length ?? 0) > 0;
   const hasRealTiming =
-    (currentCandidate?.transcriptWords?.length ?? 0) > 0 &&
+    subtitlesEnabled &&
     subtitleText.trim() === (currentCandidate?.transcriptText || '').trim();
 
-  const transcriptWords: TranscriptWord[] = hasRealTiming
-    ? currentCandidate!.transcriptWords!
-    : estimateWordsFromText(subtitleText || headline || '', startUs, endUs, 'w');
+  const transcriptWords: TranscriptWord[] = !subtitlesEnabled
+    ? []
+    : hasRealTiming
+      ? currentCandidate!.transcriptWords!
+      : estimateWordsFromText(subtitleText || headline || '', startUs, endUs, 'w');
 
   const subtitleTrack: SubtitleTrack = buildCandidateSubtitleTrack(
     transcriptWords,

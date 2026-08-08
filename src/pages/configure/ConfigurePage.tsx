@@ -14,10 +14,17 @@ export const ConfigurePage: React.FC<ConfigurePageProps> = ({ selectedFile, onSt
     layoutTemplate: 'smart_editorial',
     performanceProfile: 'balanced',
     outputResolution: '1080x1920',
+    autoSubtitles: false,
+    clipStartMinute: 0,
+    clipEndMinute: 0,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (settings.clipEndMinute > 0 && settings.clipEndMinute <= settings.clipStartMinute) {
+      alert('Menit selesai harus lebih besar dari menit mulai (atau isi 0 untuk sampai akhir video).');
+      return;
+    }
     onStartAnalysis(settings);
   };
 
@@ -39,6 +46,56 @@ export const ConfigurePage: React.FC<ConfigurePageProps> = ({ selectedFile, onSt
 
       <form onSubmit={handleSubmit} style={styles.form}>
         <div style={styles.grid}>
+          <div className="card">
+            <h3>⏳ Rentang Menit Auto-Clip</h3>
+            <p style={styles.labelDesc}>
+              Atur dari menit ke berapa sampai menit berapa video dipotong. Analisis &amp; kandidat hanya dibuat di dalam rentang ini (lebih cepat). 0 = dari awal / sampai akhir.
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <label style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Menit mulai
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={settings.clipStartMinute}
+                  onChange={(e) =>
+                    setSettings({ ...settings, clipStartMinute: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+                  }
+                  style={{ ...styles.select, marginTop: '0.35rem' }}
+                />
+              </label>
+              <label style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Menit selesai
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={settings.clipEndMinute}
+                  onChange={(e) =>
+                    setSettings({ ...settings, clipEndMinute: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+                  }
+                  style={{ ...styles.select, marginTop: '0.35rem' }}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3>💬 Subtitle Otomatis</h3>
+            <p style={styles.labelDesc}>
+              Default MATI: clip murni potongan video tanpa teks subtitle. Nyalakan hanya jika ingin subtitle kata-per-kata dibakar ke video.
+            </p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+              <input
+                type="checkbox"
+                checked={settings.autoSubtitles}
+                onChange={(e) => setSettings({ ...settings, autoSubtitles: e.target.checked })}
+              />
+              Buat subtitle otomatis pada clip
+            </label>
+          </div>
+
           <div className="card">
             <h3>🌐 Bahasa Audio</h3>
             <p style={styles.labelDesc}>Pilih bahasa untuk transkripsi model Whisper.</p>

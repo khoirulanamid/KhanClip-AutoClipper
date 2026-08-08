@@ -22,6 +22,9 @@ export const App: React.FC = () => {
     layoutTemplate: 'smart_editorial',
     performanceProfile: 'balanced',
     outputResolution: '1080x1920',
+    autoSubtitles: false,
+    clipStartMinute: 0,
+    clipEndMinute: 0,
   });
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [activeCandidateId, setActiveCandidateId] = useState<string>('');

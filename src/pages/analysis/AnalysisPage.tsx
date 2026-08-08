@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { extractAudioFromVideoFile } from '@/infrastructure/media/audio/extractor';
 import { resampleAudioTo16k, transcribeWithWorker } from '@/infrastructure/media/transcription/whisper';
+import { loadCloudTranscriptionConfig, transcribeWithCloudApi } from '@/infrastructure/media/transcription/cloud';
 import { generateCandidatesFromTranscript } from '@/domain/candidate/generator';
 import { analyzeVideoFrame } from '@/infrastructure/media/vision/detector';
 import { localStorageAdapter, transcriptCacheId } from '@/infrastructure/storage/indexeddb';
@@ -72,10 +73,30 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
 
         if (!isMounted) return;
 
+        // Clip window (minutes) configured by the user: everything below only
+        // looks inside [windowStartUs, windowEndUs] so long videos process fast.
+        const windowStartUs = Math.max(0, Math.round(settings.clipStartMinute * 60_000_000));
+        const windowEndUs =
+          settings.clipEndMinute > 0
+            ? Math.min(audioRes.value.durationUs, Math.round(settings.clipEndMinute * 60_000_000))
+            : audioRes.value.durationUs;
+        const windowedSpeechSegments = audioRes.value.speechSegments
+          .map((s) => ({
+            startUs: Math.max(s.startUs, windowStartUs),
+            endUs: Math.min(s.endUs, windowEndUs),
+          }))
+          .filter((s) => s.endUs > s.startUs);
+
+        if (windowStartUs >= audioRes.value.durationUs) {
+          throw new Error(
+            `Menit mulai (${settings.clipStartMinute}) melebihi durasi video (${Math.floor(audioRes.value.durationUs / 60_000_000)} menit). Atur ulang rentang menit di halaman Konfigurasi.`
+          );
+        }
+
         // Step 2: Local Whisper transcription inside a Web Worker (off main thread).
-        // Same file re-analyzed? Reuse the cached transcript and skip Whisper entirely.
+        // Same file+window re-analyzed? Reuse the cached transcript and skip Whisper.
         updateStepStatus('whisper', 'in_progress', 'Memeriksa cache transkrip lokal...');
-        const cacheId = transcriptCacheId(targetFile);
+        const cacheId = `${transcriptCacheId(targetFile)}-w${settings.clipStartMinute}-${settings.clipEndMinute}`;
         const cachedRes = await localStorageAdapter.getTranscript(cacheId);
         const cachedDoc = cachedRes.success ? cachedRes.value : null;
 
@@ -91,18 +112,33 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
             audioBuffer.sampleRate
           );
 
-          const transRes = await transcribeWithWorker(
-            'proj-01',
-            settings.language,
-            settings.performanceProfile,
-            pcm16kMono,
-            audioRes.value.speechSegments,
-            (percent, stageMessage) => {
-              if (!isMounted) return;
-              updateStepStatus('whisper', 'in_progress', stageMessage);
-              setOverallProgress(30 + Math.round(percent * 0.2));
-            }
-          );
+          const progressReporter = (percent: number, stageMessage: string): void => {
+            if (!isMounted) return;
+            updateStepStatus('whisper', 'in_progress', stageMessage);
+            setOverallProgress(30 + Math.round(percent * 0.2));
+          };
+
+          // Opt-in cloud transcription (user's own API key) beats the local
+          // worker pool; local stays the default for privacy and offline use.
+          const cloudConfig = loadCloudTranscriptionConfig();
+          const transRes =
+            cloudConfig.enabled && cloudConfig.apiKey
+              ? await transcribeWithCloudApi(
+                  cloudConfig,
+                  'proj-01',
+                  settings.language,
+                  pcm16kMono,
+                  windowedSpeechSegments,
+                  progressReporter
+                )
+              : await transcribeWithWorker(
+                  'proj-01',
+                  settings.language,
+                  settings.performanceProfile,
+                  pcm16kMono,
+                  windowedSpeechSegments,
+                  progressReporter
+                );
           if (!transRes.success) {
             throw new Error(transRes.error.message + (transRes.error.suggestedFallback ? ` ${transRes.error.suggestedFallback}` : ''));
           }
@@ -114,9 +150,13 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
 
         if (!isMounted) return;
 
-        // Step 3: Real Candidate Generation & Quality Scoring
+        // Step 3: Real Candidate Generation & Quality Scoring (window only)
         updateStepStatus('highlight', 'in_progress', 'Menhitung Skor Kualitas & Poin Ilmu...');
-        const candidates = generateCandidatesFromTranscript('proj-01', transcript, settings);
+        const windowedTranscript: TranscriptDocument = {
+          ...transcript,
+          segments: transcript.segments.filter((s) => s.endUs > windowStartUs && s.startUs < windowEndUs),
+        };
+        const candidates = generateCandidatesFromTranscript('proj-01', windowedTranscript, settings);
         updateStepStatus('highlight', 'completed', `Dihasilkan ${candidates.length} kandidat clip berkualitas`);
         setOverallProgress(70);
 

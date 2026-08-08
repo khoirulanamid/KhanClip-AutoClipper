@@ -28,6 +28,12 @@ export interface ProjectSettings {
   layoutTemplate: 'smart_editorial' | 'center_focus' | 'bg_blur' | 'simple_subtitle';
   performanceProfile: 'eco' | 'balanced' | 'max';
   outputResolution: '720x1280' | '1080x1920';
+  /** Burn auto-generated subtitles into clips (default off: pure video clips). */
+  autoSubtitles: boolean;
+  /** Analysis/clip window start in whole minutes (0 = from the beginning). */
+  clipStartMinute: number;
+  /** Analysis/clip window end in whole minutes (0 = until the end of video). */
+  clipEndMinute: number;
 }
 
 export interface Project {

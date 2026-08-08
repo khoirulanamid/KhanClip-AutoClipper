@@ -10,6 +10,9 @@ const settings: ProjectSettings = {
   layoutTemplate: 'smart_editorial',
   performanceProfile: 'balanced',
   outputResolution: '1080x1920',
+  autoSubtitles: true,
+  clipStartMinute: 0,
+  clipEndMinute: 0,
 };
 
 /** Builds a transcript of four 10-second speech segments with per-word timestamps. */
@@ -77,6 +80,18 @@ describe('Candidate Generator — real word timestamp flow', () => {
     for (const cand of candidates) {
       const joined = cand.transcriptWords!.map((w) => w.text).join(' ');
       expect(joined).toBe(cand.transcriptText);
+    }
+  });
+
+  it('leaves transcriptWords empty when autoSubtitles is off', () => {
+    const candidates = generateCandidatesFromTranscript('proj-gen', buildTranscript(), {
+      ...settings,
+      autoSubtitles: false,
+    });
+
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const cand of candidates) {
+      expect(cand.transcriptWords).toEqual([]);
     }
   });
 });

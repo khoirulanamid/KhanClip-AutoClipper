@@ -24,6 +24,9 @@ describe('Real Candidate Generator & Audio Segment Algorithm', () => {
       layoutTemplate: 'smart_editorial',
       performanceProfile: 'balanced',
       outputResolution: '1080x1920',
+      autoSubtitles: false,
+      clipStartMinute: 0,
+      clipEndMinute: 0,
     };
 
     const candidates = generateCandidatesFromTranscript('proj-1', transcript, settings);

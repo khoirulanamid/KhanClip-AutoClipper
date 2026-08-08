@@ -110,7 +110,9 @@ export function generateCandidatesFromTranscript(
           title: `Clip ${candIndex.toString().padStart(2, '0')}: ${headlineText.slice(0, 30)}...`,
           headline: headlineText,
           transcriptText: fullText,
-          transcriptWords: extractTranscriptWords(transcript, currentStart, currentEnd),
+          transcriptWords: settings.autoSubtitles
+            ? extractTranscriptWords(transcript, currentStart, currentEnd)
+            : [],
           keywords: keywords.length > 0 ? keywords : ['ilmu', 'edukasi', 'insight'],
           startUs: currentStart,
           endUs: currentEnd,
@@ -160,7 +162,9 @@ export function generateCandidatesFromTranscript(
       title: `Clip ${candIndex.toString().padStart(2, '0')}: ${headlineText.slice(0, 30)}...`,
       headline: headlineText,
       transcriptText: fullText,
-      transcriptWords: extractTranscriptWords(transcript, currentStart, currentEnd),
+      transcriptWords: settings.autoSubtitles
+        ? extractTranscriptWords(transcript, currentStart, currentEnd)
+        : [],
       keywords: ['kesimpulan', 'ilmu', 'edukasi'],
       startUs: currentStart,
       endUs: currentEnd,
