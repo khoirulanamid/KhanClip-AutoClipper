@@ -21,6 +21,12 @@ interface DownloadProgress {
 let transcriber: any = null;
 let loadedModelId = '';
 
+// Model download sources, tried in order. The Hugging Face hub is primary;
+// hf-mirror.com is a full URL-compatible mirror used automatically when the
+// hub is unreachable (some networks/regions block huggingface.co), so the
+// app keeps working for everyone.
+const MODEL_SOURCES = ['https://huggingface.co/', 'https://hf-mirror.com/'];
+
 const post = (message: WorkerResponse): void => {
   (self as unknown as Worker).postMessage(message);
 };
@@ -28,6 +34,37 @@ const post = (message: WorkerResponse): void => {
 /**
  * Creates the ASR pipeline with automatic device fallback:
  * WebGPU (fast) -> WASM/CPU (universal). Runs on every device.
+ */
+async function createTranscriber(
+  modelId: string,
+  onDownloadProgress: (p: DownloadProgress) => void
+): Promise<any> {
+  const hasWebGPU = typeof navigator !== 'undefined' && !!(navigator as any).gpu;
+  const attempts: { device: 'webgpu' | 'wasm'; dtype: unknown }[] = hasWebGPU
+    ? [
+        { device: 'webgpu', dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' } },
+        { device: 'wasm', dtype: 'q8' },
+      ]
+    : [{ device: 'wasm', dtype: 'q8' }];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      return await pipeline('automatic-speech-recognition', modelId, {
+        device: attempt.device,
+        dtype: attempt.dtype,
+        progress_callback: onDownloadProgress,
+      } as any);
+    } catch (err) {
+      lastError = err; // fall through to WASM
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Creates (or reuses) the pipeline, retrying across model download sources
+ * so a blocked Hugging Face hub does not break transcription.
  */
 async function getTranscriber(
   modelId: string,
@@ -40,26 +77,15 @@ async function getTranscriber(
     transcriber = null;
   }
 
-  const hasWebGPU = typeof navigator !== 'undefined' && !!(navigator as any).gpu;
-  const attempts: { device: 'webgpu' | 'wasm'; dtype: unknown }[] = hasWebGPU
-    ? [
-        { device: 'webgpu', dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' } },
-        { device: 'wasm', dtype: 'q8' },
-      ]
-    : [{ device: 'wasm', dtype: 'q8' }];
-
   let lastError: unknown = null;
-  for (const attempt of attempts) {
+  for (const host of MODEL_SOURCES) {
+    env.remoteHost = host;
     try {
-      transcriber = await pipeline('automatic-speech-recognition', modelId, {
-        device: attempt.device,
-        dtype: attempt.dtype,
-        progress_callback: onDownloadProgress,
-      } as any);
+      transcriber = await createTranscriber(modelId, onDownloadProgress);
       loadedModelId = modelId;
       return transcriber;
     } catch (err) {
-      lastError = err; // fall through to WASM
+      lastError = err; // fall through to the mirror source
     }
   }
   throw lastError;
@@ -105,8 +131,10 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     sendProgress(50, 'Mentranskripsi audio dengan Whisper (sepenuhnya lokal)...');
 
     const whisperLanguage = mapLanguageToWhisper(msg.language);
+    // The pipeline expects the raw 16 kHz Float32Array directly; an object
+    // wrapper ({ audio, sampling_rate }) is not unwrapped and crashes chunking.
     const output = await transcribe(
-      { audio: new Float32Array(msg.audioBuffer), sampling_rate: msg.sampleRate },
+      new Float32Array(msg.audioBuffer),
       {
         return_timestamps: 'word',
         chunk_length_s: 30,
