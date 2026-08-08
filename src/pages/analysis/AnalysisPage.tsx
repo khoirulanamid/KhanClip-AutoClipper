@@ -83,6 +83,7 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
           settings.language,
           settings.performanceProfile,
           pcm16kMono,
+          audioRes.value.speechSegments,
           (percent, stageMessage) => {
             if (!isMounted) return;
             updateStepStatus('whisper', 'in_progress', stageMessage);

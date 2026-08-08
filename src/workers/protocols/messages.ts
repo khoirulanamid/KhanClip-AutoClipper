@@ -20,6 +20,8 @@ export interface StartTranscriptionRequest extends BaseWorkerMessage {
   sampleRate: number;
   language: string;
   modelProfile: 'eco' | 'balanced' | 'max';
+  /** Optional VAD speech ranges (microseconds); silence outside them is skipped. */
+  speechSegments?: { startUs: number; endUs: number }[];
 }
 
 export interface DetectCandidatesRequest extends BaseWorkerMessage {

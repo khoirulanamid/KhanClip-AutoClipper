@@ -4,6 +4,7 @@ import {
   chunksToTranscriptDocument,
   mapLanguageToWhisper,
   pickWhisperModel,
+  planTranscriptionRanges,
   WhisperWordChunk,
 } from '@/infrastructure/media/transcription/whisper';
 
@@ -131,20 +132,49 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     sendProgress(50, 'Mentranskripsi audio dengan Whisper (sepenuhnya lokal)...');
 
     const whisperLanguage = mapLanguageToWhisper(msg.language);
+    const transcribeOptions = {
+      return_timestamps: 'word',
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      ...(whisperLanguage ? { language: whisperLanguage, task: 'transcribe' } : {}),
+    };
+
+    // Transcribe speech ranges separately instead of one giant call: silence
+    // is skipped, progress is visible per range, and each call stays bounded.
     // The pipeline expects the raw 16 kHz Float32Array directly; an object
     // wrapper ({ audio, sampling_rate }) is not unwrapped and crashes chunking.
-    const output = await transcribe(
-      new Float32Array(msg.audioBuffer),
-      {
-        return_timestamps: 'word',
-        chunk_length_s: 30,
-        stride_length_s: 5,
-        ...(whisperLanguage ? { language: whisperLanguage, task: 'transcribe' } : {}),
-      }
-    );
+    const audio = new Float32Array(msg.audioBuffer);
+    const totalUs = Math.round((audio.length / msg.sampleRate) * 1_000_000);
+    const ranges = planTranscriptionRanges(msg.speechSegments, totalUs);
 
-    const chunks: WhisperWordChunk[] = output?.chunks ?? [];
-    const doc = chunksToTranscriptDocument(chunks, msg.projectId, msg.language, modelId);
+    const allChunks: WhisperWordChunk[] = [];
+    for (let i = 0; i < ranges.length; i++) {
+      const range = ranges[i];
+      const startSample = Math.floor((range.startUs / 1_000_000) * msg.sampleRate);
+      const endSample = Math.min(audio.length, Math.ceil((range.endUs / 1_000_000) * msg.sampleRate));
+      if (endSample <= startSample) continue;
+
+      const offsetSec = startSample / msg.sampleRate;
+      const output = await transcribe(audio.subarray(startSample, endSample), transcribeOptions);
+
+      for (const chunk of (output?.chunks ?? []) as WhisperWordChunk[]) {
+        const [startSec, endSec] = chunk.timestamp ?? [null, null];
+        allChunks.push({
+          text: chunk.text,
+          timestamp: [
+            startSec == null ? null : startSec + offsetSec,
+            endSec == null ? null : endSec + offsetSec,
+          ],
+        });
+      }
+
+      sendProgress(
+        50 + Math.round(((i + 1) / ranges.length) * 45),
+        `Mentranskripsi bagian ${i + 1}/${ranges.length} dengan Whisper lokal...`
+      );
+    }
+
+    const doc = chunksToTranscriptDocument(allChunks, msg.projectId, msg.language, modelId);
 
     sendProgress(100, 'Transkripsi selesai.');
     post({

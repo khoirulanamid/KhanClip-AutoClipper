@@ -162,6 +162,57 @@ export function chunksToTranscriptDocument(
 }
 
 /**
+ * Plans the audio ranges to transcribe: pads VAD speech segments, merges
+ * nearby ones, and splits anything longer than two minutes so each Whisper
+ * call stays short (visible progress, bounded memory, cancellable).
+ * Falls back to the full duration when no speech segments are provided.
+ */
+export interface UsRange {
+  startUs: number;
+  endUs: number;
+}
+
+const RANGE_PAD_US = 1_000_000;
+const RANGE_MERGE_GAP_US = 1_500_000;
+const RANGE_MAX_US = 120_000_000;
+
+export function planTranscriptionRanges(
+  speechSegments: UsRange[] | undefined,
+  totalUs: number
+): UsRange[] {
+  const base: UsRange[] =
+    speechSegments && speechSegments.length > 0
+      ? speechSegments
+      : [{ startUs: 0, endUs: totalUs }];
+
+  const padded = base
+    .map((r) => ({
+      startUs: Math.max(0, r.startUs - RANGE_PAD_US),
+      endUs: Math.min(totalUs, r.endUs + RANGE_PAD_US),
+    }))
+    .filter((r) => r.endUs > r.startUs)
+    .sort((a, b) => a.startUs - b.startUs);
+
+  const merged: UsRange[] = [];
+  for (const r of padded) {
+    const last = merged[merged.length - 1];
+    if (last && r.startUs - last.endUs <= RANGE_MERGE_GAP_US) {
+      last.endUs = Math.max(last.endUs, r.endUs);
+    } else {
+      merged.push({ ...r });
+    }
+  }
+
+  const out: UsRange[] = [];
+  for (const r of merged) {
+    for (let s = r.startUs; s < r.endUs; s += RANGE_MAX_US) {
+      out.push({ startUs: s, endUs: Math.min(r.endUs, s + RANGE_MAX_US) });
+    }
+  }
+  return out;
+}
+
+/**
  * Runs Whisper transcription inside a dedicated Web Worker so the main thread
  * stays responsive on every device. Model weights are downloaded once from the
  * Hugging Face CDN and cached in the browser (offline afterwards); audio and
@@ -172,6 +223,7 @@ export function transcribeWithWorker(
   language: string,
   modelProfile: 'eco' | 'balanced' | 'max',
   pcm16kMono: Float32Array,
+  speechSegments: UsRange[] | undefined,
   onProgress?: (percent: number, stageMessage: string) => void,
   signal?: AbortSignal
 ): Promise<Result<TranscriptDocument>> {
@@ -238,6 +290,7 @@ export function transcribeWithWorker(
       sampleRate: WHISPER_TARGET_SAMPLE_RATE,
       language,
       modelProfile,
+      speechSegments,
     };
     worker.postMessage(request, [buffer]);
   });

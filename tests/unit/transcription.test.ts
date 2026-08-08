@@ -4,6 +4,7 @@ import {
   pickWhisperModel,
   resampleAudioTo16k,
   chunksToTranscriptDocument,
+  planTranscriptionRanges,
   WHISPER_TARGET_SAMPLE_RATE,
   WhisperWordChunk,
 } from '@/infrastructure/media/transcription/whisper';
@@ -103,5 +104,29 @@ describe('Whisper transcription adapter (Phase B)', () => {
     expect(doc.segments[0].words.length).toBe(1);
     expect(doc.segments[0].words[0].word).toBe('waktu');
     expect(doc.segments[0].words[0].endUs).toBe(1_000_000); // falls back to start
+  });
+
+  it('falls back to full-duration 2-minute ranges without speech segments', () => {
+    const ranges = planTranscriptionRanges(undefined, 300_000_000);
+    expect(ranges).toEqual([
+      { startUs: 0, endUs: 120_000_000 },
+      { startUs: 120_000_000, endUs: 240_000_000 },
+      { startUs: 240_000_000, endUs: 300_000_000 },
+    ]);
+  });
+
+  it('pads, merges nearby segments, and clamps to total duration', () => {
+    const ranges = planTranscriptionRanges(
+      [
+        { startUs: 10_000_000, endUs: 20_000_000 },
+        { startUs: 21_000_000, endUs: 30_000_000 }, // 1s gap -> merged after padding
+        { startUs: 500_000_000, endUs: 510_000_000 }, // far away -> separate
+      ],
+      505_000_000
+    );
+    expect(ranges).toEqual([
+      { startUs: 9_000_000, endUs: 31_000_000 },
+      { startUs: 499_000_000, endUs: 505_000_000 }, // clamped to total
+    ]);
   });
 });
