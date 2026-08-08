@@ -9,19 +9,128 @@ export interface AudioExtractionResult {
   audioBuffer: AudioBuffer;
 }
 
+/** Optional stage/progress reporter so the UI can show the real extraction phase. */
+export type AudioExtractionStage = (stageMessage: string, percent?: number) => void;
+
+/**
+ * Fallback decoder for containers that `decodeAudioData` cannot demux.
+ * Plays the file muted in a hidden <video> element and records the output
+ * stream in real time via captureStream(). Works on every device that can
+ * play the file at all, regardless of codec/container quirks.
+ */
+function captureAudioViaPlayback(file: File, onStage?: AudioExtractionStage): Promise<AudioBuffer> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.src = url;
+    video.muted = true; // mute only affects element output, not captureStream
+    video.playsInline = true;
+    video.preload = 'auto';
+
+    const cleanup = (): void => {
+      URL.revokeObjectURL(url);
+      video.removeAttribute('src');
+      video.remove();
+    };
+
+    video.onerror = (): void => {
+      cleanup();
+      reject(new Error('Browser tidak dapat memutar file ini (codec tidak didukung perangkat).'));
+    };
+
+    video.onloadedmetadata = (): void => {
+      void (async () => {
+        let ctx: AudioContext | null = null;
+        let stream: MediaStream | null = null;
+        try {
+          const captureFn =
+            (video as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream ??
+            (video as HTMLVideoElement & { webkitCaptureStream?: () => MediaStream }).webkitCaptureStream;
+          if (typeof captureFn !== 'function') {
+            throw new Error('Peramban tidak mendukung perekaman audio dari elemen video.');
+          }
+          stream = captureFn.call(video);
+          ctx = new AudioContext();
+          await ctx.resume();
+
+          const source = ctx.createMediaStreamSource(stream);
+          const processor = ctx.createScriptProcessor(8192, 1, 1);
+          const sink = ctx.createGain();
+          sink.gain.value = 0; // never audible
+          const chunks: Float32Array[] = [];
+          let capturedSamples = 0;
+          processor.onaudioprocess = (e: AudioProcessingEvent): void => {
+            const data = e.inputBuffer.getChannelData(0);
+            chunks.push(new Float32Array(data));
+            capturedSamples += data.length;
+          };
+          source.connect(processor);
+          processor.connect(sink);
+          sink.connect(ctx.destination);
+
+          const duration = video.duration;
+          video.ontimeupdate = (): void => {
+            if (Number.isFinite(duration) && duration > 0) {
+              const pct = (video.currentTime / duration) * 100;
+              onStage?.(
+                `Dekode langsung tidak didukung container ini — merekam audio dari pemutaran: ${Math.round(pct)}%`,
+                pct
+              );
+            }
+          };
+          video.onended = (): void => {
+            void (async () => {
+              const buffer = ctx!.createBuffer(1, capturedSamples, ctx!.sampleRate);
+              const target = buffer.getChannelData(0);
+              let offset = 0;
+              for (const c of chunks) {
+                target.set(c, offset);
+                offset += c.length;
+              }
+              processor.disconnect();
+              source.disconnect();
+              sink.disconnect();
+              stream?.getTracks().forEach((t) => t.stop());
+              await ctx!.close();
+              cleanup();
+              resolve(buffer);
+            })();
+          };
+
+          await video.play();
+        } catch (err) {
+          stream?.getTracks().forEach((t) => t.stop());
+          await ctx?.close().catch(() => undefined);
+          cleanup();
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      })();
+    };
+  });
+}
+
 /**
  * Extracts and decodes raw PCM audio from a local video file using Web Audio API.
+ * Primary path: `decodeAudioData` on the container (fast).
+ * Fallback path: real-time playback capture for containers the demuxer rejects.
  * 100% Local processing in browser.
  */
 export async function extractAudioFromVideoFile(
-  file: File
+  file: File,
+  onStage?: AudioExtractionStage
 ): Promise<Result<AudioExtractionResult>> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-
-    // Decode audio track directly from MP4/WebM/MOV container
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    let audioBuffer: AudioBuffer;
+    try {
+      onStage?.('Mendekode audio via Web Audio API...');
+      const arrayBuffer = await file.arrayBuffer();
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      await audioContext.close();
+    } catch {
+      // Container/codec not demuxable directly; record from playback instead.
+      audioBuffer = await captureAudioViaPlayback(file, onStage);
+    }
 
     const durationUs = Math.round(audioBuffer.duration * 1000000);
     const sampleRate = audioBuffer.sampleRate;
@@ -95,9 +204,6 @@ export async function extractAudioFromVideoFile(
         });
       }
     }
-
-    // Close AudioContext to release resources per AGENTS.md safety rule
-    await audioContext.close();
 
     return Ok({
       durationUs,

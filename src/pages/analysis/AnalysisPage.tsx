@@ -57,7 +57,11 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({
         // Step 1: Real Audio Extraction
         updateStepStatus('audio', 'in_progress', 'Mengurai audio via Web Audio API...');
         setOverallProgress(10);
-        const audioRes = await extractAudioFromVideoFile(targetFile);
+        const audioRes = await extractAudioFromVideoFile(targetFile, (stageMessage, percent) => {
+          if (!isMounted) return;
+          updateStepStatus('audio', 'in_progress', stageMessage);
+          if (typeof percent === 'number') setOverallProgress(10 + Math.round(percent * 0.2));
+        });
         if (!audioRes.success) {
           throw new Error(audioRes.error.message);
         }
