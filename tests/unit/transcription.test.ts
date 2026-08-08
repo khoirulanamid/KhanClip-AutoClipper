@@ -5,6 +5,8 @@ import {
   resampleAudioTo16k,
   chunksToTranscriptDocument,
   planTranscriptionRanges,
+  splitRangesIntoShards,
+  pickTranscriptionWorkerCount,
   WHISPER_TARGET_SAMPLE_RATE,
   WhisperWordChunk,
 } from '@/infrastructure/media/transcription/whisper';
@@ -128,5 +130,54 @@ describe('Whisper transcription adapter (Phase B)', () => {
       { startUs: 9_000_000, endUs: 31_000_000 },
       { startUs: 499_000_000, endUs: 505_000_000 }, // clamped to total
     ]);
+  });
+});
+
+describe('Parallel transcription worker pool', () => {
+  it('keeps a single worker for one range or low-memory devices', () => {
+    expect(pickTranscriptionWorkerCount(1, 16, 16)).toBe(1);
+    expect(pickTranscriptionWorkerCount(10, 16, 2)).toBe(1);
+  });
+
+  it('caps workers at half the cores, max four, never more than ranges', () => {
+    expect(pickTranscriptionWorkerCount(10, 16)).toBe(4);
+    expect(pickTranscriptionWorkerCount(10, 4)).toBe(2);
+    expect(pickTranscriptionWorkerCount(2, 16)).toBe(2);
+    expect(pickTranscriptionWorkerCount(10, undefined)).toBe(1); // unknown cores -> conservative
+  });
+
+  it('splits ranges into contiguous shards covering every range exactly once', () => {
+    const ranges = [
+      { startUs: 0, endUs: 60_000_000 },
+      { startUs: 60_000_000, endUs: 120_000_000 },
+      { startUs: 200_000_000, endUs: 260_000_000 },
+      { startUs: 260_000_000, endUs: 320_000_000 },
+    ];
+
+    const shards = splitRangesIntoShards(ranges, 2);
+
+    expect(shards.length).toBe(2);
+    expect(shards.flatMap((s) => s.ranges)).toEqual(ranges);
+    for (const shard of shards) {
+      expect(shard.sliceStartUs).toBe(shard.ranges[0].startUs);
+      expect(shard.sliceEndUs).toBe(shard.ranges[shard.ranges.length - 1].endUs);
+    }
+    // Balanced by duration: 120s each.
+    expect(shards[0].ranges.length).toBe(2);
+    expect(shards[1].ranges.length).toBe(2);
+  });
+
+  it('never creates more shards than ranges and balances uneven durations', () => {
+    const ranges = [
+      { startUs: 0, endUs: 100_000_000 },
+      { startUs: 100_000_000, endUs: 120_000_000 },
+    ];
+
+    const shards = splitRangesIntoShards(ranges, 4);
+
+    expect(shards.length).toBe(2);
+    // The long range must not share a shard with the short one.
+    expect(shards[0].ranges).toEqual([ranges[0]]);
+    expect(shards[1].ranges).toEqual([ranges[1]]);
   });
 });

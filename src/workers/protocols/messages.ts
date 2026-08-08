@@ -14,14 +14,19 @@ export interface BaseWorkerMessage {
 export interface StartTranscriptionRequest extends BaseWorkerMessage {
   type: 'START_TRANSCRIPTION';
   projectId: string;
-  /** Mono PCM audio samples (Float32) transferred as an ArrayBuffer. */
+  /**
+   * Mono PCM audio samples (Float32) transferred as an ArrayBuffer.
+   * In pool mode this is only the shard slice assigned to this worker.
+   */
   audioBuffer: ArrayBuffer;
   /** Sampling rate of audioBuffer in Hz (16000 expected by Whisper). */
   sampleRate: number;
   language: string;
   modelProfile: 'eco' | 'balanced' | 'max';
-  /** Optional VAD speech ranges (microseconds); silence outside them is skipped. */
-  speechSegments?: { startUs: number; endUs: number }[];
+  /** Global microsecond time of the first sample in audioBuffer. */
+  audioOffsetUs: number;
+  /** Assigned transcription ranges in global microseconds. */
+  ranges: { startUs: number; endUs: number }[];
 }
 
 export interface DetectCandidatesRequest extends BaseWorkerMessage {
@@ -51,6 +56,12 @@ export interface WorkerProgressEvent extends BaseWorkerMessage {
   taskType: WorkerTaskType;
   percent: number;
   stageMessage: string;
+  /** Inference backend chosen by the worker (e.g. 'WebGPU (fp16)', 'WASM/CPU'). */
+  backend?: string;
+  /** Ranges finished by this worker so far (pool aggregation). */
+  completedRanges?: number;
+  /** Ranges assigned to this worker (pool aggregation). */
+  totalRanges?: number;
 }
 
 export interface WorkerSuccessResponse<T = unknown> extends BaseWorkerMessage {

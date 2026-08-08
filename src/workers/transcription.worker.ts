@@ -1,10 +1,9 @@
 import { pipeline, env } from '@huggingface/transformers';
 import { WorkerRequest, WorkerResponse } from './protocols/messages';
 import {
-  chunksToTranscriptDocument,
   mapLanguageToWhisper,
   pickWhisperModel,
-  planTranscriptionRanges,
+  TranscriptionWorkerPayload,
   WhisperWordChunk,
 } from '@/infrastructure/media/transcription/whisper';
 
@@ -102,7 +101,13 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
   if (msg.type !== 'START_TRANSCRIPTION') return;
 
-  const sendProgress = (percent: number, stageMessage: string): void => {
+  const sendProgress = (
+    percent: number,
+    stageMessage: string,
+    backendLabel?: string,
+    completedRanges?: number,
+    totalRanges?: number
+  ): void => {
     post({
       id: msg.id,
       timestampUs: Date.now() * 1000,
@@ -110,6 +115,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       taskType: 'TRANSCRIPTION',
       percent,
       stageMessage,
+      backend: backendLabel,
+      completedRanges,
+      totalRanges,
     });
   };
 
@@ -135,7 +143,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       }
     });
 
-    sendProgress(50, `Model siap via ${backend}. Mentranskripsi audio dengan Whisper (sepenuhnya lokal)...`);
+    sendProgress(50, `Model siap via ${backend}. Mentranskripsi audio dengan Whisper (sepenuhnya lokal)...`, backend, 0, msg.ranges.length);
 
     const whisperLanguage = mapLanguageToWhisper(msg.language);
     const transcribeOptions = {
@@ -145,22 +153,30 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       ...(whisperLanguage ? { language: whisperLanguage, task: 'transcribe' } : {}),
     };
 
-    // Transcribe speech ranges separately instead of one giant call: silence
-    // is skipped, progress is visible per range, and each call stays bounded.
-    // The pipeline expects the raw 16 kHz Float32Array directly; an object
-    // wrapper ({ audio, sampling_rate }) is not unwrapped and crashes chunking.
+    // This worker only owns its assigned shard: audioBuffer is the slice
+    // starting at audioOffsetUs. The pipeline expects the raw 16 kHz
+    // Float32Array directly; an object wrapper ({ audio, sampling_rate }) is
+    // not unwrapped and crashes chunking.
     const audio = new Float32Array(msg.audioBuffer);
-    const totalUs = Math.round((audio.length / msg.sampleRate) * 1_000_000);
-    const ranges = planTranscriptionRanges(msg.speechSegments, totalUs);
+    const offsetUs = msg.audioOffsetUs;
 
     const allChunks: WhisperWordChunk[] = [];
-    for (let i = 0; i < ranges.length; i++) {
-      const range = ranges[i];
-      const startSample = Math.floor((range.startUs / 1_000_000) * msg.sampleRate);
-      const endSample = Math.min(audio.length, Math.ceil((range.endUs / 1_000_000) * msg.sampleRate));
-      if (endSample <= startSample) continue;
+    let completed = 0;
+    for (const range of msg.ranges) {
+      const startSample = Math.max(
+        0,
+        Math.min(audio.length, Math.floor(((range.startUs - offsetUs) / 1_000_000) * msg.sampleRate))
+      );
+      const endSample = Math.max(
+        startSample,
+        Math.min(audio.length, Math.ceil(((range.endUs - offsetUs) / 1_000_000) * msg.sampleRate))
+      );
+      if (endSample <= startSample) {
+        completed++;
+        continue;
+      }
 
-      const offsetSec = startSample / msg.sampleRate;
+      const offsetSec = offsetUs / 1_000_000 + startSample / msg.sampleRate;
       const output = await transcribe(audio.subarray(startSample, endSample), transcribeOptions);
 
       for (const chunk of (output?.chunks ?? []) as WhisperWordChunk[]) {
@@ -174,21 +190,24 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         });
       }
 
+      completed++;
       sendProgress(
-        50 + Math.round(((i + 1) / ranges.length) * 45),
-        `Mentranskripsi bagian ${i + 1}/${ranges.length} dengan Whisper lokal...`
+        50 + Math.round((completed / msg.ranges.length) * 45),
+        `Mentranskripsi bagian ${completed}/${msg.ranges.length} dengan Whisper lokal...`,
+        backend,
+        completed,
+        msg.ranges.length
       );
     }
 
-    const doc = chunksToTranscriptDocument(allChunks, msg.projectId, msg.language, modelId);
-
-    sendProgress(100, 'Transkripsi selesai.');
+    sendProgress(100, 'Transkripsi selesai.', backend, completed, msg.ranges.length);
+    const payload: TranscriptionWorkerPayload = { chunks: allChunks, modelId, backend };
     post({
       id: msg.id,
       timestampUs: Date.now() * 1000,
       type: 'SUCCESS',
       taskType: 'TRANSCRIPTION',
-      payload: doc,
+      payload,
     });
   } catch (err: any) {
     post({

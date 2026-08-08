@@ -213,11 +213,78 @@ export function planTranscriptionRanges(
 }
 
 /**
- * Runs Whisper transcription inside a dedicated Web Worker so the main thread
- * stays responsive on every device. Model weights are downloaded once from the
- * Hugging Face CDN and cached in the browser (offline afterwards); audio and
- * transcript never leave the device.
+ * Runs Whisper transcription inside a pool of dedicated Web Workers so the
+ * main thread stays responsive and multiple CPU cores / GPU sessions work in
+ * parallel. Ranges are split into contiguous, duration-balanced shards; each
+ * worker receives only its own audio slice (no full-audio duplication).
+ * Model weights are downloaded once from the Hugging Face CDN and cached in
+ * the browser (offline afterwards); audio and transcript never leave the device.
  */
+export interface TranscriptionShard {
+  ranges: UsRange[];
+  sliceStartUs: number;
+  sliceEndUs: number;
+}
+
+/** Payload returned by each transcription worker (chunks in global time). */
+export interface TranscriptionWorkerPayload {
+  chunks: WhisperWordChunk[];
+  modelId: string;
+  backend: string;
+}
+
+/**
+ * Splits sorted, non-overlapping ranges into `count` contiguous shards,
+ * balanced by total speech duration so parallel workers finish together.
+ */
+export function splitRangesIntoShards(ranges: UsRange[], count: number): TranscriptionShard[] {
+  const shardCount = Math.max(1, Math.min(count, ranges.length));
+  const totalUs = ranges.reduce((sum, r) => sum + (r.endUs - r.startUs), 0);
+  const targetUs = totalUs / shardCount;
+
+  const shards: TranscriptionShard[] = [];
+  let current: UsRange[] = [];
+  let currentUs = 0;
+
+  const closeShard = (): void => {
+    if (current.length === 0) return;
+    shards.push({
+      ranges: current,
+      sliceStartUs: current[0].startUs,
+      sliceEndUs: current[current.length - 1].endUs,
+    });
+    current = [];
+    currentUs = 0;
+  };
+
+  for (const range of ranges) {
+    const remainingSlots = shardCount - shards.length;
+    if (current.length > 0 && currentUs >= targetUs && remainingSlots > 1) {
+      closeShard();
+    }
+    current.push(range);
+    currentUs += range.endUs - range.startUs;
+  }
+  closeShard();
+  return shards;
+}
+
+/**
+ * Chooses the parallel worker count: never more workers than ranges, capped
+ * at half the cores (max 4), and forced to 1 on low-memory devices or when
+ * there is nothing to parallelize.
+ */
+export function pickTranscriptionWorkerCount(
+  rangeCount: number,
+  hardwareConcurrency?: number,
+  deviceMemoryGb?: number
+): number {
+  if (rangeCount <= 1) return 1;
+  if (typeof deviceMemoryGb === 'number' && deviceMemoryGb <= 2) return 1;
+  const cores = typeof hardwareConcurrency === 'number' && hardwareConcurrency > 0 ? hardwareConcurrency : 2;
+  return Math.min(rangeCount, Math.max(1, Math.min(4, Math.floor(cores / 2))));
+}
+
 export function transcribeWithWorker(
   projectId: string,
   language: string,
@@ -228,70 +295,135 @@ export function transcribeWithWorker(
   signal?: AbortSignal
 ): Promise<Result<TranscriptDocument>> {
   return new Promise((resolve) => {
-    let settled = false;
-    const worker = new Worker(
-      new URL('../../../workers/transcription.worker.ts', import.meta.url),
-      { type: 'module' }
+    const totalUs = Math.round((pcm16kMono.length / WHISPER_TARGET_SAMPLE_RATE) * 1_000_000);
+    const ranges = planTranscriptionRanges(speechSegments, totalUs);
+    const deviceMemoryGb = (navigator as any).deviceMemory as number | undefined;
+    const shards = splitRangesIntoShards(
+      ranges,
+      pickTranscriptionWorkerCount(ranges.length, navigator.hardwareConcurrency, deviceMemoryGb)
     );
 
-    const finish = (result: Result<TranscriptDocument>) => {
+    const workers: Worker[] = [];
+    let settled = false;
+    let completedWorkers = 0;
+    let backend = '';
+    let lastDownloadMessage = '';
+    const shardPercent = shards.map(() => 0);
+    const shardDoneRanges = shards.map(() => 0);
+    const shardTotalRanges = shards.map((s) => s.ranges.length);
+    const shardWeights = shards.map(
+      (s) => s.ranges.reduce((sum, r) => sum + (r.endUs - r.startUs), 0) || 1
+    );
+    const payloads: (TranscriptionWorkerPayload | null)[] = shards.map(() => null);
+
+    const finish = (result: Result<TranscriptDocument>): void => {
       if (settled) return;
       settled = true;
       signal?.removeEventListener('abort', onAbort);
-      worker.terminate(); // release worker resources per AGENTS.md safety rule
+      for (const w of workers) w.terminate(); // release worker resources per AGENTS.md safety rule
       resolve(result);
     };
 
-    const onAbort = () =>
+    const onAbort = (): void =>
       finish(Err(createAppError('TRANSCRIPTION_CANCELLED', 'Transkripsi dibatalkan oleh pengguna.')));
 
     if (signal) {
       if (signal.aborted) {
-        worker.terminate();
-        resolve(Err(createAppError('TRANSCRIPTION_CANCELLED', 'Transkripsi dibatalkan oleh pengguna.')));
+        onAbort();
         return;
       }
       signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    const id = `trans-req-${Date.now()}`;
-
-    worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-      const msg = e.data;
-      if (msg.id !== id) return;
-
-      if (msg.type === 'PROGRESS') {
-        onProgress?.(msg.percent, msg.stageMessage);
-      } else if (msg.type === 'SUCCESS') {
-        finish(Ok(msg.payload as TranscriptDocument));
-      } else if (msg.type === 'ERROR') {
-        finish(Err(createAppError(msg.errorCode, msg.errorMessage, { suggestedFallback: msg.suggestedFallback, retryable: true })));
-      }
-    };
-
-    worker.onerror = (e) => {
-      finish(
-        Err(
-          createAppError(
-            'TRANSCRIPTION_WORKER_FAILED',
-            e.message || 'Worker transkripsi gagal dijalankan di perangkat ini.'
-          )
-        )
+    const emitProgress = (): void => {
+      const totalWeight = shardWeights.reduce((a, b) => a + b, 0);
+      const percent = Math.round(
+        shardPercent.reduce((sum, p, i) => sum + p * shardWeights[i], 0) / totalWeight
       );
+      const done = shardDoneRanges.reduce((a, b) => a + b, 0);
+      const total = shardTotalRanges.reduce((a, b) => a + b, 0);
+      const message =
+        percent < 50 && lastDownloadMessage
+          ? lastDownloadMessage
+          : `Mentranskripsi ${done}/${total} bagian dengan ${workers.length} worker paralel${backend ? ` via ${backend}` : ''} (sepenuhnya lokal)...`;
+      onProgress?.(percent, message);
     };
 
-    const buffer = pcm16kMono.buffer as ArrayBuffer;
-    const request: StartTranscriptionRequest = {
-      id,
-      timestampUs: Date.now() * 1000,
-      type: 'START_TRANSCRIPTION',
-      projectId,
-      audioBuffer: buffer,
-      sampleRate: WHISPER_TARGET_SAMPLE_RATE,
-      language,
-      modelProfile,
-      speechSegments,
-    };
-    worker.postMessage(request, [buffer]);
+    shards.forEach((shard, index) => {
+      const worker = new Worker(new URL('../../../workers/transcription.worker.ts', import.meta.url), {
+        type: 'module',
+      });
+      workers.push(worker);
+      const id = `trans-req-${Date.now()}-${index}`;
+
+      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
+        const msg = e.data;
+        if (msg.id !== id) return;
+
+        if (msg.type === 'PROGRESS') {
+          shardPercent[index] = msg.percent;
+          if (typeof msg.completedRanges === 'number') shardDoneRanges[index] = msg.completedRanges;
+          if (msg.backend) backend = msg.backend;
+          if (/Mengunduh model/.test(msg.stageMessage)) lastDownloadMessage = msg.stageMessage;
+          emitProgress();
+        } else if (msg.type === 'SUCCESS') {
+          payloads[index] = msg.payload as TranscriptionWorkerPayload;
+          shardPercent[index] = 100;
+          shardDoneRanges[index] = shardTotalRanges[index];
+          completedWorkers++;
+          emitProgress();
+          if (completedWorkers === shards.length) {
+            const chunks = payloads.flatMap((p) => p?.chunks ?? []);
+            chunks.sort((a, b) => (a.timestamp[0] ?? 0) - (b.timestamp[0] ?? 0));
+            const modelId = payloads.find((p) => p)?.modelId ?? 'Xenova/whisper-tiny';
+            finish(Ok(chunksToTranscriptDocument(chunks, projectId, language, modelId)));
+          }
+        } else if (msg.type === 'ERROR') {
+          finish(
+            Err(
+              createAppError(msg.errorCode, msg.errorMessage, {
+                suggestedFallback: msg.suggestedFallback,
+                retryable: true,
+              })
+            )
+          );
+        }
+      };
+
+      worker.onerror = (e) => {
+        finish(
+          Err(
+            createAppError(
+              'TRANSCRIPTION_WORKER_FAILED',
+              e.message || 'Worker transkripsi gagal dijalankan di perangkat ini.'
+            )
+          )
+        );
+      };
+
+      const startSample = Math.max(
+        0,
+        Math.floor((shard.sliceStartUs / 1_000_000) * WHISPER_TARGET_SAMPLE_RATE)
+      );
+      const endSample = Math.min(
+        pcm16kMono.length,
+        Math.ceil((shard.sliceEndUs / 1_000_000) * WHISPER_TARGET_SAMPLE_RATE)
+      );
+      const slice = pcm16kMono.slice(startSample, endSample);
+      const buffer = slice.buffer as ArrayBuffer;
+      const request: StartTranscriptionRequest = {
+        id,
+        timestampUs: Date.now() * 1000,
+        type: 'START_TRANSCRIPTION',
+        projectId,
+        audioBuffer: buffer,
+        sampleRate: WHISPER_TARGET_SAMPLE_RATE,
+        language,
+        modelProfile,
+        audioOffsetUs: Math.round((startSample / WHISPER_TARGET_SAMPLE_RATE) * 1_000_000),
+        ranges: shard.ranges,
+      };
+      worker.postMessage(request, [buffer]);
+    });
   });
 }
