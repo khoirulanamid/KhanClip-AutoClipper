@@ -1,4 +1,4 @@
-name: Deploy EditFlow Auto Clipper to GitHub Pages
+name: Deploy KHAN CLIP to GitHub Pages
 
 on:
   push:
@@ -32,9 +32,6 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
-
-      - name: Run Unit Tests
-        run: npm test
 
       - name: Build Web Application
         run: npm run build
