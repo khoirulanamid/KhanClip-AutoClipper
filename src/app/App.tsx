@@ -1,6 +1,33 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 
 type ExportState = 'idle' | 'exporting' | 'done' | 'error';
+type PreviewState = 'idle' | 'loading' | 'playing';
+
+const MEDIAPIPE_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm';
+const FACE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+
+const createFaceLandmarker = async () => {
+  const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
+  const options = {
+    baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: 'GPU' as const },
+    runningMode: 'VIDEO' as const,
+    numFaces: 4,
+    outputFaceBlendshapes: true,
+    minFaceDetectionConfidence: 0.45,
+    minFacePresenceConfidence: 0.45,
+    minTrackingConfidence: 0.45,
+  };
+
+  try {
+    return await FaceLandmarker.createFromOptions(vision, options);
+  } catch {
+    return FaceLandmarker.createFromOptions(vision, {
+      ...options,
+      baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: 'CPU' as const },
+    });
+  }
+};
 
 const formatTime = (seconds: number) => {
   const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
@@ -28,6 +55,10 @@ const ScissorsIcon = () => (
 export const App: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const previewLandmarkerRef = useRef<FaceLandmarker | null>(null);
+  const previewAnimationRef = useRef<number | null>(null);
+  const previewFocusRef = useRef({ x: 0.5, y: 0.44, frame: 0 });
   const cancelExportRef = useRef(false);
   const [file, setFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
@@ -38,11 +69,17 @@ export const App: React.FC = () => {
   const [exportState, setExportState] = useState<ExportState>('idle');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
+  const [exportLabel, setExportLabel] = useState('Menyiapkan video…');
+  const [previewState, setPreviewState] = useState<PreviewState>('idle');
 
   const end = useMemo(() => Math.min(duration, start + clipDuration), [duration, start, clipDuration]);
   const actualDuration = Math.max(0, end - start);
 
-  useEffect(() => () => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); }, [sourceUrl]);
+  useEffect(() => () => {
+    if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+    if (previewAnimationRef.current !== null) cancelAnimationFrame(previewAnimationRef.current);
+    previewLandmarkerRef.current?.close();
+  }, [sourceUrl]);
 
   const loadFile = (nextFile?: File) => {
     if (!nextFile) return;
@@ -59,6 +96,7 @@ export const App: React.FC = () => {
     setClipDuration(30);
     setProgress(0);
     setExportState('idle');
+    setPreviewState('idle');
     setError('');
   };
 
@@ -74,11 +112,82 @@ export const App: React.FC = () => {
     setExportState('idle');
   };
 
+  const stopPreview = () => {
+    const video = videoRef.current;
+    video?.pause();
+    if (previewAnimationRef.current !== null) {
+      cancelAnimationFrame(previewAnimationRef.current);
+      previewAnimationRef.current = null;
+    }
+    setPreviewState('idle');
+  };
+
   const previewFromStart = async () => {
     const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = start;
-    try { await video.play(); } catch { /* Browser may still require another user gesture. */ }
+    const canvas = previewCanvasRef.current;
+    const context = canvas?.getContext('2d');
+    if (!video || !canvas || !context) return;
+    setError('');
+    setPreviewState('loading');
+
+    try {
+      if (!previewLandmarkerRef.current) previewLandmarkerRef.current = await createFaceLandmarker();
+      video.currentTime = start;
+      previewFocusRef.current = { x: 0.5, y: 0.44, frame: 0 };
+      await video.play();
+      setPreviewState('playing');
+
+      const drawPreview = () => {
+        if (video.paused || video.ended || video.currentTime >= end) {
+          video.pause();
+          video.currentTime = start;
+          setPreviewState('idle');
+          previewAnimationRef.current = null;
+          return;
+        }
+
+        const focus = previewFocusRef.current;
+        if (focus.frame % 5 === 0 && previewLandmarkerRef.current) {
+          const result = previewLandmarkerRef.current.detectForVideo(video, performance.now());
+          let bestScore = -1;
+          result.faceLandmarks.forEach((landmarks, faceIndex) => {
+            if (!landmarks.length) return;
+            const xs = landmarks.map((point) => point.x);
+            const ys = landmarks.map((point) => point.y);
+            const minX = Math.min(...xs);
+            const maxX = Math.max(...xs);
+            const minY = Math.min(...ys);
+            const maxY = Math.max(...ys);
+            const faceArea = Math.max(0, (maxX - minX) * (maxY - minY));
+            const jawOpen = result.faceBlendshapes[faceIndex]?.categories.find(
+              (category) => category.categoryName === 'jawOpen'
+            )?.score ?? 0;
+            const score = jawOpen * 2.4 + faceArea;
+            if (score > bestScore) {
+              bestScore = score;
+              focus.x += (((minX + maxX) / 2) - focus.x) * 0.22;
+              focus.y += ((Math.max(0.2, (minY + maxY) / 2 - (maxY - minY) * 0.12)) - focus.y) * 0.16;
+            }
+          });
+        }
+
+        const targetAspect = 9 / 16;
+        const sourceAspect = video.videoWidth / video.videoHeight;
+        let sourceWidth = video.videoWidth;
+        let sourceHeight = video.videoHeight;
+        if (sourceAspect > targetAspect) sourceWidth = sourceHeight * targetAspect;
+        else sourceHeight = sourceWidth / targetAspect;
+        const sourceX = clamp(focus.x * video.videoWidth - sourceWidth / 2, 0, video.videoWidth - sourceWidth);
+        const sourceY = clamp(focus.y * video.videoHeight - sourceHeight / 2, 0, video.videoHeight - sourceHeight);
+        context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+        focus.frame += 1;
+        previewAnimationRef.current = requestAnimationFrame(drawPreview);
+      };
+      drawPreview();
+    } catch (caught) {
+      setPreviewState('idle');
+      setError(caught instanceof Error ? `Preview gagal: ${caught.message}` : 'Preview gagal dimuat. Periksa koneksi lalu coba lagi.');
+    }
   };
 
   const handleTimeUpdate = () => {
@@ -101,6 +210,7 @@ export const App: React.FC = () => {
     setError('');
     setProgress(0);
     setExportState('exporting');
+    setExportLabel('Memuat pelacak wajah…');
     cancelExportRef.current = false;
 
     const renderVideo = document.createElement('video');
@@ -109,7 +219,10 @@ export const App: React.FC = () => {
     renderVideo.playsInline = true;
     renderVideo.crossOrigin = 'anonymous';
 
+    let faceLandmarker: FaceLandmarker | null = null;
     try {
+      faceLandmarker = await createFaceLandmarker();
+      setExportLabel('Mendeteksi wajah pembicara…');
       await new Promise<void>((resolve, reject) => {
         renderVideo.onloadedmetadata = () => resolve();
         renderVideo.onerror = () => reject(new Error('Video gagal dibaca oleh browser.'));
@@ -117,8 +230,8 @@ export const App: React.FC = () => {
       });
 
       const canvas = document.createElement('canvas');
-      canvas.width = renderVideo.videoWidth;
-      canvas.height = renderVideo.videoHeight;
+      canvas.width = 1080;
+      canvas.height = 1920;
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Canvas video tidak tersedia.');
 
@@ -145,6 +258,9 @@ export const App: React.FC = () => {
       recorder.start(500);
       await renderVideo.play();
       const startedAt = performance.now();
+      let frameIndex = 0;
+      let focusX = 0.5;
+      let focusY = 0.44;
 
       await new Promise<void>((resolve) => {
         const draw = () => {
@@ -153,7 +269,42 @@ export const App: React.FC = () => {
             resolve();
             return;
           }
-          context.drawImage(renderVideo, 0, 0, canvas.width, canvas.height);
+          if (frameIndex % 5 === 0 && faceLandmarker) {
+            const result = faceLandmarker.detectForVideo(renderVideo, frameIndex * (1000 / 30));
+            let bestScore = -1;
+            result.faceLandmarks.forEach((landmarks, faceIndex) => {
+              if (!landmarks.length) return;
+              const xs = landmarks.map((point) => point.x);
+              const ys = landmarks.map((point) => point.y);
+              const minX = Math.min(...xs);
+              const maxX = Math.max(...xs);
+              const minY = Math.min(...ys);
+              const maxY = Math.max(...ys);
+              const faceArea = Math.max(0, (maxX - minX) * (maxY - minY));
+              const jawOpen = result.faceBlendshapes[faceIndex]?.categories.find(
+                (category) => category.categoryName === 'jawOpen'
+              )?.score ?? 0;
+              const score = jawOpen * 2.4 + faceArea;
+              if (score > bestScore) {
+                bestScore = score;
+                const targetX = (minX + maxX) / 2;
+                const targetY = Math.max(0.2, (minY + maxY) / 2 - (maxY - minY) * 0.12);
+                focusX += (targetX - focusX) * 0.22;
+                focusY += (targetY - focusY) * 0.16;
+              }
+            });
+          }
+
+          const targetAspect = 9 / 16;
+          const sourceAspect = renderVideo.videoWidth / renderVideo.videoHeight;
+          let sourceWidth = renderVideo.videoWidth;
+          let sourceHeight = renderVideo.videoHeight;
+          if (sourceAspect > targetAspect) sourceWidth = sourceHeight * targetAspect;
+          else sourceHeight = sourceWidth / targetAspect;
+          const sourceX = clamp(focusX * renderVideo.videoWidth - sourceWidth / 2, 0, renderVideo.videoWidth - sourceWidth);
+          const sourceY = clamp(focusY * renderVideo.videoHeight - sourceHeight / 2, 0, renderVideo.videoHeight - sourceHeight);
+          context.drawImage(renderVideo, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+          frameIndex += 1;
           setProgress(clamp(((performance.now() - startedAt) / 1000 / actualDuration) * 100, 0, 99));
           requestAnimationFrame(draw);
         };
@@ -183,6 +334,7 @@ export const App: React.FC = () => {
       setError(caught instanceof Error ? caught.message : 'Klip gagal diekspor. Coba gunakan video MP4 di Chrome atau Edge terbaru.');
       setExportState('error');
     } finally {
+      faceLandmarker?.close();
       renderVideo.remove();
     }
   };
@@ -199,8 +351,8 @@ export const App: React.FC = () => {
 
       <main className="workspace">
         <section className="intro" aria-labelledby="page-title">
-          <h1 id="page-title">Potong video</h1>
-          <p>Pilih video, atur durasi, lalu unduh hasilnya.</p>
+          <h1 id="page-title">Buat klip TikTok otomatis</h1>
+          <p>Pilih durasi. KHAN CLIP membuat video 9:16 dan mengikuti wajah pembicara.</p>
         </section>
 
         {!file ? (
@@ -225,12 +377,18 @@ export const App: React.FC = () => {
               <div><h2>Video Anda</h2><p>Putar video untuk mencari bagian yang ingin dipotong.</p></div>
             </div>
             <div className="preview-panel">
-              <div className="video-frame">
+              <div className="preview-grid">
+                <div><span className="preview-label">VIDEO ASLI</span><div className="video-frame">
                 <video ref={videoRef} src={sourceUrl} controls playsInline onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(event) => {
                   const nextDuration = event.currentTarget.duration;
                   setDuration(nextDuration);
                   setClipDuration(Math.min(30, nextDuration));
-                }} />
+                }} /></div></div>
+                <div><span className="preview-label">HASIL TIKTOK · 9:16</span><div className="tiktok-frame">
+                  <canvas ref={previewCanvasRef} width={1080} height={1920} aria-label="Preview vertikal hasil tracking wajah" />
+                  {previewState === 'idle' && <span className="preview-placeholder">Klik “Lihat preview” untuk menampilkan hasil</span>}
+                  {previewState === 'loading' && <span className="preview-placeholder">Memuat pelacak wajah…</span>}
+                </div></div>
               </div>
               <div className="file-row">
                 <div className="file-copy"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(1)} MB · Durasi {formatTime(duration)}</span></div>
@@ -242,7 +400,7 @@ export const App: React.FC = () => {
             <div className="control-panel" aria-labelledby="clip-settings-title">
               <div className="section-head">
                 <span className="step-number">2</span>
-                <div><h2 id="clip-settings-title">Atur potongan</h2><p>Masukkan waktu mulai dan panjang video yang Anda inginkan.</p></div>
+                <div><h2 id="clip-settings-title">Atur potongan</h2><p>Hasil otomatis 1080 × 1920, tanpa subtitle atau tulisan.</p></div>
               </div>
 
               <div className="control-grid">
@@ -267,18 +425,22 @@ export const App: React.FC = () => {
               </div>
 
               {error && <p className="error-message" role="alert">{error}</p>}
-              {exportState === 'exporting' && <div className="progress-wrap" aria-live="polite"><div className="progress-meta"><span>Mengekspor klip…</span><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><span style={{ transform: `scaleX(${progress / 100})` }} /></div></div>}
+              {exportState === 'exporting' && <div className="progress-wrap" aria-live="polite"><div className="progress-meta"><span>{exportLabel}</span><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><span style={{ transform: `scaleX(${progress / 100})` }} /></div></div>}
               {exportState === 'done' && <p className="success-message" role="status">Klip selesai dan sudah diunduh.</p>}
 
               <div className="actions">
-                <button className="button button-secondary" type="button" onClick={previewFromStart} disabled={!duration || exportState === 'exporting'}>Putar potongan</button>
+                {previewState === 'playing' ? (
+                  <button className="button button-secondary" type="button" onClick={stopPreview}>Hentikan preview</button>
+                ) : (
+                  <button className="button button-secondary" type="button" onClick={previewFromStart} disabled={!duration || exportState === 'exporting' || previewState === 'loading'}>{previewState === 'loading' ? 'Memuat preview…' : 'Lihat preview'}</button>
+                )}
                 {exportState === 'exporting' ? (
                   <button className="button button-danger" type="button" onClick={() => { cancelExportRef.current = true; }}>Batalkan</button>
                 ) : (
                   <button className="button button-primary" type="button" onClick={exportClip} disabled={!duration}><ScissorsIcon />Potong dan unduh</button>
                 )}
               </div>
-              <p className="export-note">Video hasil tidak diberi tulisan, filter, crop, atau watermark.</p>
+              <p className="export-note">Auto-reframe hanya mengubah video menjadi vertikal dan menjaga pembicara tetap di dalam frame. Tidak ada subtitle, tulisan, atau watermark.</p>
             </div>
           </section>
         )}
