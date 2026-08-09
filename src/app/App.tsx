@@ -116,10 +116,9 @@ export const App: React.FC = () => {
         renderVideo.load();
       });
 
-      const scale = Math.min(1, 1920 / renderVideo.videoWidth, 1080 / renderVideo.videoHeight);
       const canvas = document.createElement('canvas');
-      canvas.width = Math.max(2, Math.floor(renderVideo.videoWidth * scale / 2) * 2);
-      canvas.height = Math.max(2, Math.floor(renderVideo.videoHeight * scale / 2) * 2);
+      canvas.width = renderVideo.videoWidth;
+      canvas.height = renderVideo.videoHeight;
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Canvas video tidak tersedia.');
 
@@ -200,9 +199,8 @@ export const App: React.FC = () => {
 
       <main className="workspace">
         <section className="intro" aria-labelledby="page-title">
-          <p className="eyebrow">VIDEO CLIPPER</p>
-          <h1 id="page-title">Potong video. Tepat sesuai durasi.</h1>
-          <p>Pilih bagian yang dibutuhkan, periksa hasilnya, lalu ekspor. Tanpa subtitle, analisis, atau pengaturan yang mengganggu.</p>
+          <h1 id="page-title">Potong video</h1>
+          <p>Pilih video, atur durasi, lalu unduh hasilnya.</p>
         </section>
 
         {!file ? (
@@ -215,13 +213,17 @@ export const App: React.FC = () => {
           >
             <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
             <span className="upload-icon"><UploadIcon /></span>
-            <h2 id="upload-title">Masukkan video</h2>
-            <p>Tarik file ke sini atau pilih dari perangkat. File tidak diunggah ke server.</p>
+            <h2 id="upload-title">Pilih video untuk dipotong</h2>
+            <p>Tarik video ke sini, atau pilih file dari perangkat Anda.</p>
             <button className="button button-primary" type="button" onClick={() => inputRef.current?.click()}>Pilih video</button>
-            <span className="file-support">MP4, WebM, MOV · sesuai dukungan browser</span>
+            <span className="file-support">Video diproses di perangkat Anda</span>
           </section>
         ) : (
-          <section className="editor-grid">
+          <section className="editor-card">
+            <div className="section-head">
+              <span className="step-number">1</span>
+              <div><h2>Video Anda</h2><p>Putar video untuk mencari bagian yang ingin dipotong.</p></div>
+            </div>
             <div className="preview-panel">
               <div className="video-frame">
                 <video ref={videoRef} src={sourceUrl} controls playsInline onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(event) => {
@@ -231,37 +233,37 @@ export const App: React.FC = () => {
                 }} />
               </div>
               <div className="file-row">
-                <div className="file-copy"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(1)} MB · {formatTime(duration)}</span></div>
+                <div className="file-copy"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(1)} MB · Durasi {formatTime(duration)}</span></div>
                 <button className="button button-quiet" type="button" onClick={() => inputRef.current?.click()}>Ganti video</button>
                 <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
               </div>
             </div>
 
-            <aside className="control-panel" aria-labelledby="clip-settings-title">
-              <div className="panel-heading">
-                <span className="step-label">PENGATURAN KLIP</span>
-                <h2 id="clip-settings-title">Tentukan bagian video</h2>
+            <div className="control-panel" aria-labelledby="clip-settings-title">
+              <div className="section-head">
+                <span className="step-number">2</span>
+                <div><h2 id="clip-settings-title">Atur potongan</h2><p>Masukkan waktu mulai dan panjang video yang Anda inginkan.</p></div>
               </div>
 
-              <div className="field-group">
-                <label htmlFor="start-time">Mulai dari</label>
-                <div className="number-field"><input id="start-time" type="number" min="0" max={Math.max(0, duration - 0.1)} step="0.1" value={Number(start.toFixed(1))} onChange={(e) => updateStart(Number(e.target.value))} /><span>detik</span></div>
-                <input className="timeline" aria-label="Waktu mulai klip" type="range" min="0" max={Math.max(0.1, duration - 0.1)} step="0.1" value={start} onChange={(e) => updateStart(Number(e.target.value))} />
-              </div>
+              <div className="control-grid">
+                <div className="field-group">
+                  <label htmlFor="start-time">Mulai pada detik</label>
+                  <div className="number-field"><input id="start-time" type="number" min="0" max={Math.max(0, duration - 0.1)} step="0.1" value={Number(start.toFixed(1))} onChange={(e) => updateStart(Number(e.target.value))} /><span>detik</span></div>
+                  <input className="timeline" aria-label="Waktu mulai klip" type="range" min="0" max={Math.max(0.1, duration - 0.1)} step="0.1" value={start} onChange={(e) => updateStart(Number(e.target.value))} />
+                </div>
 
-              <div className="field-group">
-                <label htmlFor="clip-duration">Durasi klip</label>
-                <div className="number-field"><input id="clip-duration" type="number" min="0.1" max={Math.max(0.1, duration - start)} step="0.1" value={Number(clipDuration.toFixed(1))} onChange={(e) => updateClipDuration(Number(e.target.value))} /><span>detik</span></div>
-                <div className="presets" aria-label="Pilihan cepat durasi">
-                  {[15, 30, 60].map((value) => <button key={value} type="button" disabled={value > duration - start} className={Math.abs(clipDuration - value) < 0.05 ? 'is-active' : ''} onClick={() => updateClipDuration(value)}>{value} dtk</button>)}
+                <div className="field-group">
+                  <label htmlFor="clip-duration">Panjang video</label>
+                  <div className="number-field"><input id="clip-duration" type="number" min="0.1" max={Math.max(0.1, duration - start)} step="0.1" value={Number(clipDuration.toFixed(1))} onChange={(e) => updateClipDuration(Number(e.target.value))} /><span>detik</span></div>
+                  <div className="presets" aria-label="Pilihan cepat durasi">
+                    {[15, 30, 60].map((value) => <button key={value} type="button" disabled={value > duration - start} className={Math.abs(clipDuration - value) < 0.05 ? 'is-active' : ''} onClick={() => updateClipDuration(value)}>{value} detik</button>)}
+                  </div>
                 </div>
               </div>
 
               <div className="clip-summary">
-                <span><small>Mulai</small><strong>{formatTime(start)}</strong></span>
-                <span className="summary-line" />
-                <span><small>Selesai</small><strong>{formatTime(end)}</strong></span>
-                <span className="duration-badge">{actualDuration.toFixed(1)} dtk</span>
+                <span><small>Potongan</small><strong>{formatTime(start)} — {formatTime(end)}</strong></span>
+                <span className="duration-badge">{actualDuration.toFixed(1)} detik</span>
               </div>
 
               {error && <p className="error-message" role="alert">{error}</p>}
@@ -269,15 +271,15 @@ export const App: React.FC = () => {
               {exportState === 'done' && <p className="success-message" role="status">Klip selesai dan sudah diunduh.</p>}
 
               <div className="actions">
-                <button className="button button-secondary" type="button" onClick={previewFromStart} disabled={!duration || exportState === 'exporting'}>Pratinjau</button>
+                <button className="button button-secondary" type="button" onClick={previewFromStart} disabled={!duration || exportState === 'exporting'}>Putar potongan</button>
                 {exportState === 'exporting' ? (
                   <button className="button button-danger" type="button" onClick={() => { cancelExportRef.current = true; }}>Batalkan</button>
                 ) : (
-                  <button className="button button-primary" type="button" onClick={exportClip} disabled={!duration}><ScissorsIcon />Ekspor klip</button>
+                  <button className="button button-primary" type="button" onClick={exportClip} disabled={!duration}><ScissorsIcon />Potong dan unduh</button>
                 )}
               </div>
-              <p className="export-note">Ekspor berjalan secara real-time untuk menjaga kompatibilitas audio dan video.</p>
-            </aside>
+              <p className="export-note">Video hasil tidak diberi tulisan, filter, crop, atau watermark.</p>
+            </div>
           </section>
         )}
       </main>
