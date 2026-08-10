@@ -11,9 +11,12 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .topbar { height: 64px; padding: 0 clamp(20px, 4vw, 48px); border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: #fff; }
 .brand { min-height: 44px; border: 0; background: transparent; color: var(--ink); display: inline-flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 800; letter-spacing: .07em; }
 .brand-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: white; background: var(--ink); }
-.brand-mark svg, .button svg, .upload-icon svg { width: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.brand-mark svg, .button svg, .upload-icon svg, .icon-button svg { width: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.header-actions { display: flex; align-items: center; gap: 14px; }
 .local-note { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-secondary); font-size: 13px; font-weight: 600; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.icon-button { width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 9px; display: grid; place-items: center; color: var(--ink-secondary); background: #fff; }
+.icon-button:hover { color: var(--ink); background: var(--surface-muted); }
 .workspace { width: min(900px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 72px; }
 .intro { margin: 0 0 28px; text-align: center; }
 .intro h1 { margin: 0; font-size: clamp(32px, 5vw, 44px); line-height: 1.1; letter-spacing: -.045em; font-weight: 720; }
@@ -77,6 +80,28 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .progress-track { height: 5px; overflow: hidden; border-radius: 99px; background: var(--line); }
 .progress-track span { width: 100%; height: 100%; display: block; transform-origin: left; background: var(--accent); transition: transform .18s linear; }
 .export-note { margin: 11px 0 0; color: var(--ink-secondary); text-align: center; font-size: 11px; line-height: 1.5; }
+.modal-backdrop { position: fixed; z-index: 1000; inset: 0; padding: 24px; display: grid; place-items: center; overflow-y: auto; background: rgba(18,20,18,.58); }
+.settings-dialog { width: min(620px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto; border-radius: 16px; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.25); }
+.settings-header { padding: 24px 26px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.settings-header h2 { margin: 0; font-size: 23px; letter-spacing: -.03em; }
+.settings-header p:last-child { margin: 6px 0 0; color: var(--ink-secondary); font-size: 13px; }
+.settings-kicker { margin: 0 0 8px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+.settings-form { padding: 24px 26px 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px 14px; }
+.settings-field { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.settings-field-wide { grid-column: 1 / -1; }
+.settings-field label { font-size: 13px; font-weight: 700; }
+.settings-field input, .settings-field select { width: 100%; min-height: 46px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; outline: 0; color: var(--ink); background: #fff; font-size: 14px; }
+.settings-field input:focus, .settings-field select:focus { border-color: var(--focus); }
+.settings-field small { color: var(--ink-secondary); font-size: 11px; line-height: 1.45; }
+.secret-field { display: flex; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; }
+.secret-field:focus-within { border-color: var(--focus); }
+.secret-field input { min-width: 0; border: 0; border-radius: 0; }
+.secret-field button { min-width: 92px; border: 0; border-left: 1px solid var(--line); color: var(--accent); background: var(--surface-muted); font-size: 11px; font-weight: 750; }
+.connection-message { grid-column: 1 / -1; margin: 0; padding: 11px 13px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
+.connection-message.is-testing { color: var(--ink-secondary); background: var(--surface-muted); }
+.connection-message.is-success { color: var(--success); background: var(--accent-soft); }
+.connection-message.is-error { color: var(--danger); background: #f9ecea; }
+.settings-actions { grid-column: 1 / -1; padding-top: 4px; display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; }
 @media (max-width: 680px) { .control-grid { grid-template-columns: 1fr; } .preview-grid { grid-template-columns: minmax(0, 1fr) 120px; } }
-@media (max-width: 520px) { .topbar { height: 60px; padding: 0 16px; } .workspace { width: min(100% - 24px, 900px); padding: 32px 0 48px; } .intro h1 { font-size: 32px; } .intro p { font-size: 15px; } .local-note { font-size: 0; } .section-head, .preview-panel { padding-inline: 16px; } .control-panel { padding-inline: 16px; } .preview-grid { grid-template-columns: 1fr; } .tiktok-frame { width: min(62%, 220px); margin: 0 auto; } .file-row { align-items: flex-start; } .file-copy strong { max-width: 190px; } .actions { grid-template-columns: 1fr; } .clip-summary { align-items: flex-start; } }
+@media (max-width: 520px) { .topbar { height: 60px; padding: 0 16px; } .workspace { width: min(100% - 24px, 900px); padding: 32px 0 48px; } .intro h1 { font-size: 32px; } .intro p { font-size: 15px; } .local-note { display: none; } .section-head, .preview-panel { padding-inline: 16px; } .control-panel { padding-inline: 16px; } .preview-grid { grid-template-columns: 1fr; } .tiktok-frame { width: min(62%, 220px); margin: 0 auto; } .file-row { align-items: flex-start; } .file-copy strong { max-width: 190px; } .actions { grid-template-columns: 1fr; } .clip-summary { align-items: flex-start; } .modal-backdrop { padding: 12px; align-items: start; } .settings-dialog { max-height: calc(100dvh - 24px); } .settings-header, .settings-form { padding-inline: 18px; } .settings-form { grid-template-columns: 1fr; } .settings-field-wide, .connection-message, .settings-actions { grid-column: 1; } .settings-actions { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

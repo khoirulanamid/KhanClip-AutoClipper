@@ -3,9 +3,43 @@ import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 
 type ExportState = 'idle' | 'exporting' | 'done' | 'error';
 type PreviewState = 'idle' | 'loading' | 'playing';
+type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
+
+interface SttSettings {
+  baseUrl: string;
+  apiKey: string;
+  provider: string;
+  model: string;
+  language: string;
+  timestamps: 'segment' | 'word';
+}
+
+const DEFAULT_STT_SETTINGS: SttSettings = {
+  baseUrl: 'http://localhost:20128/v1',
+  apiKey: '',
+  provider: 'groq',
+  model: 'whisper-large-v3-turbo',
+  language: 'id',
+  timestamps: 'segment',
+};
+
+const STT_PROVIDERS = [
+  { value: 'groq', label: 'Groq' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'gemini', label: 'Google Gemini' },
+  { value: 'deepgram', label: 'Deepgram' },
+  { value: 'assemblyai', label: 'AssemblyAI' },
+  { value: 'huggingface', label: 'Hugging Face' },
+  { value: 'nvidia', label: 'NVIDIA Parakeet' },
+  { value: 'custom', label: 'Provider lain' },
+];
 
 const MEDIAPIPE_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm';
 const FACE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const OUTPUT_WIDTH = 1080;
+const OUTPUT_HEIGHT = 1920;
+const OUTPUT_VIDEO_BITRATE = 16_000_000;
+const OUTPUT_AUDIO_BITRATE = 192_000;
 
 const createFaceLandmarker = async () => {
   const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
@@ -40,6 +74,21 @@ const formatTime = (seconds: number) => {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+const getSharpPortraitSize = (sourceWidth: number, sourceHeight: number) => {
+  const targetAspect = 9 / 16;
+  const sourceAspect = sourceWidth / sourceHeight;
+
+  if (sourceAspect > targetAspect) {
+    const height = Math.max(2, Math.floor(Math.min(OUTPUT_HEIGHT, sourceHeight) / 2) * 2);
+    const width = Math.max(2, Math.floor((height * targetAspect) / 2) * 2);
+    return { width, height };
+  }
+
+  const width = Math.max(2, Math.floor(Math.min(OUTPUT_WIDTH, sourceWidth) / 2) * 2);
+  const height = Math.max(2, Math.floor((width / targetAspect) / 2) * 2);
+  return { width, height };
+};
+
 const FilmIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>
 );
@@ -50,6 +99,14 @@ const UploadIcon = () => (
 
 const ScissorsIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="m8.7 8.3 11.3 8.2M8.7 15.7 20 7.5"/></svg>
+);
+
+const SettingsIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.04H5.3v-3h.14A1.7 1.7 0 0 0 7 9.92a1.7 1.7 0 0 0-.34-1.88L6.6 7.98l2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7v-.08h3v.08a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.04h.08v3h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+);
+
+const CloseIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
 );
 
 export const App: React.FC = () => {
@@ -71,6 +128,18 @@ export const App: React.FC = () => {
   const [error, setError] = useState('');
   const [exportLabel, setExportLabel] = useState('Menyiapkan video…');
   const [previewState, setPreviewState] = useState<PreviewState>('idle');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
+  const [connectionMessage, setConnectionMessage] = useState('');
+  const [sttSettings, setSttSettings] = useState<SttSettings>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('khanclip-stt-settings') || '{}');
+      return { ...DEFAULT_STT_SETTINGS, ...saved, apiKey: sessionStorage.getItem('khanclip-stt-api-key') || '' };
+    } catch {
+      return DEFAULT_STT_SETTINGS;
+    }
+  });
 
   const end = useMemo(() => Math.min(duration, start + clipDuration), [duration, start, clipDuration]);
   const actualDuration = Math.max(0, end - start);
@@ -80,6 +149,46 @@ export const App: React.FC = () => {
     if (previewAnimationRef.current !== null) cancelAnimationFrame(previewAnimationRef.current);
     previewLandmarkerRef.current?.close();
   }, [sourceUrl]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSettingsOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [settingsOpen]);
+
+  const saveSttSettings = (event: React.FormEvent) => {
+    event.preventDefault();
+    const { apiKey, ...safeSettings } = sttSettings;
+    localStorage.setItem('khanclip-stt-settings', JSON.stringify(safeSettings));
+    if (apiKey) sessionStorage.setItem('khanclip-stt-api-key', apiKey);
+    else sessionStorage.removeItem('khanclip-stt-api-key');
+    setSettingsOpen(false);
+  };
+
+  const testSttConnection = async () => {
+    setConnectionState('testing');
+    setConnectionMessage('Menghubungkan ke 9Router…');
+    try {
+      const baseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(baseUrl)) throw new Error('Endpoint harus dimulai dengan http:// atau https://.');
+      const response = await fetch(`${baseUrl}/models`, {
+        headers: sttSettings.apiKey ? { Authorization: `Bearer ${sttSettings.apiKey}` } : {},
+      });
+      if (!response.ok) {
+        if (response.status === 401) throw new Error('API key ditolak oleh 9Router.');
+        throw new Error(`9Router merespons dengan status ${response.status}.`);
+      }
+      setConnectionState('success');
+      setConnectionMessage('Terhubung ke 9Router. Endpoint dan API key valid.');
+    } catch (caught) {
+      setConnectionState('error');
+      const detail = caught instanceof Error ? caught.message : 'Koneksi gagal.';
+      setConnectionMessage(`${detail} Pastikan 9Router aktif dan mengizinkan akses browser (CORS).`);
+    }
+  };
 
   const loadFile = (nextFile?: File) => {
     if (!nextFile) return;
@@ -127,6 +236,8 @@ export const App: React.FC = () => {
     const canvas = previewCanvasRef.current;
     const context = canvas?.getContext('2d');
     if (!video || !canvas || !context) return;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
     setError('');
     setPreviewState('loading');
 
@@ -230,10 +341,13 @@ export const App: React.FC = () => {
       });
 
       const canvas = document.createElement('canvas');
-      canvas.width = 1080;
-      canvas.height = 1920;
+      const sharpOutputSize = getSharpPortraitSize(renderVideo.videoWidth, renderVideo.videoHeight);
+      canvas.width = sharpOutputSize.width;
+      canvas.height = sharpOutputSize.height;
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Canvas video tidak tersedia.');
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
 
       const canvasStream = canvas.captureStream(30);
       const sourceStream = (renderVideo as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream?.();
@@ -241,7 +355,12 @@ export const App: React.FC = () => {
 
       const candidates = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus'];
       const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
-      const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType, videoBitsPerSecond: 8_000_000 } : { videoBitsPerSecond: 8_000_000 });
+      const recorderOptions: MediaRecorderOptions = {
+        videoBitsPerSecond: OUTPUT_VIDEO_BITRATE,
+        audioBitsPerSecond: OUTPUT_AUDIO_BITRATE,
+        ...(mimeType ? { mimeType } : {}),
+      };
+      const recorder = new MediaRecorder(canvasStream, recorderOptions);
       const chunks: Blob[] = [];
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
 
@@ -346,7 +465,10 @@ export const App: React.FC = () => {
           <span className="brand-mark"><FilmIcon /></span>
           <span>KHAN CLIP</span>
         </button>
-        <span className="local-note"><span className="status-dot" />Diproses lokal</span>
+        <div className="header-actions">
+          <span className="local-note"><span className="status-dot" />Diproses lokal</span>
+          <button className="icon-button" type="button" onClick={() => { setSettingsOpen(true); setConnectionState('idle'); }} aria-label="Buka pengaturan"><SettingsIcon /></button>
+        </div>
       </header>
 
       <main className="workspace">
@@ -400,7 +522,7 @@ export const App: React.FC = () => {
             <div className="control-panel" aria-labelledby="clip-settings-title">
               <div className="section-head">
                 <span className="step-number">2</span>
-                <div><h2 id="clip-settings-title">Atur potongan</h2><p>Hasil otomatis 1080 × 1920, tanpa subtitle atau tulisan.</p></div>
+                <div><h2 id="clip-settings-title">Atur potongan</h2><p>Hasil otomatis 9:16 dengan resolusi tajam hingga 1080 × 1920.</p></div>
               </div>
 
               <div className="control-grid">
@@ -440,11 +562,69 @@ export const App: React.FC = () => {
                   <button className="button button-primary" type="button" onClick={exportClip} disabled={!duration}><ScissorsIcon />Potong dan unduh</button>
                 )}
               </div>
-              <p className="export-note">Auto-reframe hanya mengubah video menjadi vertikal dan menjaga pembicara tetap di dalam frame. Tidak ada subtitle, tulisan, atau watermark.</p>
+              <p className="export-note">Resolusi mengikuti detail asli crop agar video tidak diperbesar dan menjadi buram. Maksimal 1080 × 1920.</p>
             </div>
           </section>
         )}
       </main>
+
+      {settingsOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+          <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <header className="settings-header">
+              <div><p className="settings-kicker">PENGATURAN</p><h2 id="settings-title">Speech-to-Text</h2><p>Hubungkan KHAN CLIP dengan 9Router lokal.</p></div>
+              <button className="icon-button" type="button" onClick={() => setSettingsOpen(false)} aria-label="Tutup pengaturan"><CloseIcon /></button>
+            </header>
+
+            <form className="settings-form" onSubmit={saveSttSettings}>
+              <div className="settings-field settings-field-wide">
+                <label htmlFor="stt-endpoint">Endpoint 9Router</label>
+                <input id="stt-endpoint" type="url" value={sttSettings.baseUrl} onChange={(event) => setSttSettings({ ...sttSettings, baseUrl: event.target.value })} required />
+                <small>Default lokal: http://localhost:20128/v1</small>
+              </div>
+
+              <div className="settings-field settings-field-wide">
+                <label htmlFor="stt-key">API key</label>
+                <div className="secret-field"><input id="stt-key" type={showApiKey ? 'text' : 'password'} value={sttSettings.apiKey} onChange={(event) => setSttSettings({ ...sttSettings, apiKey: event.target.value })} autoComplete="off" placeholder="sk-…" /><button type="button" onClick={() => setShowApiKey(!showApiKey)}>{showApiKey ? 'Sembunyikan' : 'Tampilkan'}</button></div>
+                <small>Disimpan hanya selama sesi browser dan tidak dimasukkan ke GitHub.</small>
+              </div>
+
+              <div className="settings-field">
+                <label htmlFor="stt-provider">Provider</label>
+                <select id="stt-provider" value={sttSettings.provider} onChange={(event) => setSttSettings({ ...sttSettings, provider: event.target.value })}>
+                  {STT_PROVIDERS.map((provider) => <option key={provider.value} value={provider.value}>{provider.label}</option>)}
+                </select>
+              </div>
+
+              <div className="settings-field">
+                <label htmlFor="stt-model">Model ID</label>
+                <input id="stt-model" type="text" value={sttSettings.model} onChange={(event) => setSttSettings({ ...sttSettings, model: event.target.value })} placeholder="whisper-large-v3-turbo" required />
+              </div>
+
+              <div className="settings-field">
+                <label htmlFor="stt-language">Bahasa audio</label>
+                <select id="stt-language" value={sttSettings.language} onChange={(event) => setSttSettings({ ...sttSettings, language: event.target.value })}>
+                  <option value="auto">Deteksi otomatis</option><option value="id">Bahasa Indonesia</option><option value="en">English</option>
+                </select>
+              </div>
+
+              <div className="settings-field">
+                <label htmlFor="stt-timestamps">Timestamp subtitle</label>
+                <select id="stt-timestamps" value={sttSettings.timestamps} onChange={(event) => setSttSettings({ ...sttSettings, timestamps: event.target.value as SttSettings['timestamps'] })}>
+                  <option value="segment">Per kalimat (lebih ringan)</option><option value="word">Per kata (lebih detail)</option>
+                </select>
+              </div>
+
+              {connectionState !== 'idle' && <p className={`connection-message is-${connectionState}`} role="status">{connectionMessage}</p>}
+
+              <footer className="settings-actions">
+                <button className="button button-secondary" type="button" onClick={testSttConnection} disabled={connectionState === 'testing'}>{connectionState === 'testing' ? 'Menguji…' : 'Tes koneksi'}</button>
+                <button className="button button-primary" type="submit">Simpan pengaturan</button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 };
