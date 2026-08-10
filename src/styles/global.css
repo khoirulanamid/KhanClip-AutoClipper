@@ -74,6 +74,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .error-message, .success-message { margin: 16px 0 0; padding: 11px 13px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
 .error-message { color: var(--danger); background: #f9ecea; }
 .success-message { color: var(--success); background: var(--accent-soft); }
+.subtitle-status { margin: 14px 0 0; color: var(--ink-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
 .progress-wrap { margin-top: 18px; }
 .progress-meta { margin-bottom: 8px; display: flex; justify-content: space-between; color: var(--ink-secondary); font-size: 12px; }
 .progress-meta strong { color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -101,6 +102,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .connection-message.is-testing { color: var(--ink-secondary); background: var(--surface-muted); }
 .connection-message.is-success { color: var(--success); background: var(--accent-soft); }
 .connection-message.is-error { color: var(--danger); background: #f9ecea; }
+.settings-check-hint { grid-column: 1 / -1; margin: 0; color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
 .settings-actions { grid-column: 1 / -1; padding-top: 4px; display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; }
 @media (max-width: 680px) { .control-grid { grid-template-columns: 1fr; } .preview-grid { grid-template-columns: minmax(0, 1fr) 120px; } }
 @media (max-width: 520px) { .topbar { height: 60px; padding: 0 16px; } .workspace { width: min(100% - 24px, 900px); padding: 32px 0 48px; } .intro h1 { font-size: 32px; } .intro p { font-size: 15px; } .local-note { display: none; } .section-head, .preview-panel { padding-inline: 16px; } .control-panel { padding-inline: 16px; } .preview-grid { grid-template-columns: 1fr; } .tiktok-frame { width: min(62%, 220px); margin: 0 auto; } .file-row { align-items: flex-start; } .file-copy strong { max-width: 190px; } .actions { grid-template-columns: 1fr; } .clip-summary { align-items: flex-start; } .modal-backdrop { padding: 12px; align-items: start; } .settings-dialog { max-height: calc(100dvh - 24px); } .settings-header, .settings-form { padding-inline: 18px; } .settings-form { grid-template-columns: 1fr; } .settings-field-wide, .connection-message, .settings-actions { grid-column: 1; } .settings-actions { grid-template-columns: 1fr; } }

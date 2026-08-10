@@ -15,6 +15,12 @@ interface SttSettings {
   timestamps: 'segment' | 'word';
 }
 
+interface SubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
 const DEFAULT_STT_SETTINGS: SttSettings = {
   baseUrl: '',
   apiKey: '',
@@ -82,6 +88,43 @@ const getSharpPortraitSize = (sourceWidth: number, sourceHeight: number) => {
   return { width, height };
 };
 
+const blobToBase64 = (blob: Blob) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+  reader.onerror = () => reject(new Error('Audio gagal dibaca.'));
+  reader.readAsDataURL(blob);
+});
+
+const drawSubtitle = (context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, cue?: SubtitleCue) => {
+  if (!cue?.text.trim()) return;
+  const fontSize = Math.max(24, Math.round(canvas.width * 0.052));
+  const maxWidth = canvas.width * 0.84;
+  context.save();
+  context.font = `700 ${fontSize}px Inter, sans-serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  const words = cue.text.trim().split(/\s+/);
+  const lines: string[] = [];
+  let line = '';
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (context.measureText(next).width > maxWidth && line) { lines.push(line); line = word; }
+    else line = next;
+  });
+  if (line) lines.push(line);
+  const visibleLines = lines.slice(0, 3);
+  const lineHeight = fontSize * 1.25;
+  const boxHeight = visibleLines.length * lineHeight + fontSize * 0.7;
+  const centerY = canvas.height * 0.79;
+  context.fillStyle = 'rgba(0, 0, 0, 0.72)';
+  context.beginPath();
+  context.roundRect(canvas.width * 0.06, centerY - boxHeight / 2, canvas.width * 0.88, boxHeight, fontSize * 0.28);
+  context.fill();
+  context.fillStyle = '#fff';
+  visibleLines.forEach((text, index) => context.fillText(text, canvas.width / 2, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight));
+  context.restore();
+};
+
 const FilmIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>
 );
@@ -125,6 +168,9 @@ export const App: React.FC = () => {
   const [showApiKey, setShowApiKey] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [connectionMessage, setConnectionMessage] = useState('');
+  const [verifiedSettingsKey, setVerifiedSettingsKey] = useState('');
+  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
+  const [subtitleStatus, setSubtitleStatus] = useState('');
   const [sttSettings, setSttSettings] = useState<SttSettings>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('khanclip-stt-settings') || '{}');
@@ -136,6 +182,14 @@ export const App: React.FC = () => {
 
   const end = useMemo(() => Math.min(duration, start + clipDuration), [duration, start, clipDuration]);
   const actualDuration = Math.max(0, end - start);
+  const currentSettingsKey = JSON.stringify({
+    baseUrl: sttSettings.baseUrl.trim().replace(/\/+$/, ''),
+    apiKey: sttSettings.apiKey.trim(),
+    apiFormat: sttSettings.apiFormat,
+    provider: sttSettings.provider.trim(),
+    model: sttSettings.model.trim(),
+  });
+  const settingsVerified = connectionState === 'success' && verifiedSettingsKey === currentSettingsKey;
 
   useEffect(() => () => {
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
@@ -152,21 +206,38 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [settingsOpen]);
 
+  useEffect(() => {
+    if (!verifiedSettingsKey || verifiedSettingsKey === currentSettingsKey) return;
+    setVerifiedSettingsKey('');
+    setConnectionState('idle');
+    setConnectionMessage('');
+  }, [currentSettingsKey, verifiedSettingsKey]);
+
   const saveSttSettings = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!settingsVerified) {
+      setConnectionState('error');
+      setConnectionMessage('Cek pengaturan terlebih dahulu sebelum menyimpan.');
+      return;
+    }
     const { apiKey, ...safeSettings } = sttSettings;
     localStorage.setItem('khanclip-stt-settings', JSON.stringify(safeSettings));
     if (apiKey) sessionStorage.setItem('khanclip-stt-api-key', apiKey);
     else sessionStorage.removeItem('khanclip-stt-api-key');
+    setSubtitleCues([]);
+    setSubtitleStatus('');
     setSettingsOpen(false);
   };
 
   const testSttConnection = async () => {
     setConnectionState('testing');
+    setVerifiedSettingsKey('');
     setConnectionMessage('Menghubungkan ke API…');
     try {
       const baseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
       if (!/^https?:\/\//i.test(baseUrl)) throw new Error('Endpoint harus dimulai dengan http:// atau https://.');
+      if (!sttSettings.provider.trim()) throw new Error('Nama provider belum diisi.');
+      if (!sttSettings.model.trim()) throw new Error('Model ID belum diisi.');
       const isGemini = sttSettings.apiFormat === 'gemini';
       const testUrl = isGemini
         ? `${baseUrl}/models${sttSettings.apiKey ? `?key=${encodeURIComponent(sttSettings.apiKey)}` : ''}`
@@ -178,11 +249,13 @@ export const App: React.FC = () => {
         if (response.status === 401 || response.status === 403) throw new Error('API key ditolak oleh provider.');
         throw new Error(`API merespons dengan status ${response.status}.`);
       }
+      setVerifiedSettingsKey(currentSettingsKey);
       setConnectionState('success');
       setConnectionMessage(sttSettings.apiFormat === 'custom'
         ? 'Endpoint dapat dijangkau. Validasi API key untuk format custom dilakukan saat transkripsi.'
         : 'Terhubung. Endpoint dan API key dapat digunakan.');
     } catch (caught) {
+      setVerifiedSettingsKey('');
       setConnectionState('error');
       const detail = caught instanceof Error ? caught.message : 'Koneksi gagal.';
       setConnectionMessage(`${detail} Pastikan endpoint benar dan provider mengizinkan akses browser (CORS).`);
@@ -206,18 +279,100 @@ export const App: React.FC = () => {
     setExportState('idle');
     setPreviewState('idle');
     setError('');
+    setSubtitleCues([]);
+    setSubtitleStatus('');
   };
 
   const updateStart = (value: number) => {
     const maxStart = Math.max(0, duration - 0.1);
     setStart(clamp(Number.isFinite(value) ? value : 0, 0, maxStart));
     setExportState('idle');
+    setSubtitleCues([]);
   };
 
   const updateClipDuration = (value: number) => {
     const available = Math.max(0.1, duration - start);
     setClipDuration(clamp(Number.isFinite(value) ? value : 0.1, 0.1, available));
     setExportState('idle');
+    setSubtitleCues([]);
+  };
+
+  const recordSelectedAudio = async () => {
+    const audioVideo = document.createElement('video');
+    audioVideo.src = sourceUrl;
+    audioVideo.preload = 'auto';
+    audioVideo.muted = true;
+    await new Promise<void>((resolve, reject) => {
+      audioVideo.onloadedmetadata = () => resolve();
+      audioVideo.onerror = () => reject(new Error('Audio video tidak dapat dibaca.'));
+      audioVideo.load();
+    });
+    await new Promise<void>((resolve) => { audioVideo.onseeked = () => resolve(); audioVideo.currentTime = start; });
+    const captured = (audioVideo as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream?.();
+    const audioTrack = captured?.getAudioTracks()[0];
+    if (!audioTrack) throw new Error('Browser tidak dapat mengambil audio dari video ini. Gunakan Chrome atau Edge terbaru.');
+    const stream = new MediaStream([audioTrack]);
+    const mimeType = ['audio/webm;codecs=opus', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type)) || '';
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 128_000 } : { audioBitsPerSecond: 128_000 });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    const finished = new Promise<Blob>((resolve, reject) => {
+      recorder.onerror = () => reject(new Error('Perekaman audio gagal.'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+    });
+    recorder.start(500);
+    await audioVideo.play();
+    await new Promise<void>((resolve) => {
+      const monitor = () => {
+        if (audioVideo.currentTime >= end || audioVideo.ended) { audioVideo.pause(); resolve(); }
+        else requestAnimationFrame(monitor);
+      };
+      monitor();
+    });
+    recorder.stop();
+    const blob = await finished;
+    stream.getTracks().forEach((track) => track.stop());
+    audioVideo.remove();
+    return blob;
+  };
+
+  const transcribeSelectedClip = async () => {
+    if (!sttSettings.baseUrl || !sttSettings.model || !sttSettings.provider) throw new Error('Lengkapi endpoint, provider, dan model pada Pengaturan terlebih dahulu.');
+    const audio = await recordSelectedAudio();
+    setSubtitleStatus('Mengirim audio ke provider…');
+    const baseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
+    let data: any;
+
+    if (sttSettings.apiFormat === 'gemini') {
+      const audioBase64 = await blobToBase64(audio);
+      const prompt = `Transkripsikan audio ini dalam bahasa ${sttSettings.language === 'auto' ? 'aslinya' : sttSettings.language}. Kembalikan HANYA JSON array tanpa markdown: [{"start":0.0,"end":2.5,"text":"..."}]. Waktu relatif dari awal audio, pecah menjadi kalimat subtitle pendek.`;
+      const response = await fetch(`${baseUrl}/models/${encodeURIComponent(sttSettings.model)}:generateContent?key=${encodeURIComponent(sttSettings.apiKey)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: audio.type || 'audio/webm', data: audioBase64 } }] }] }),
+      });
+      if (!response.ok) throw new Error(`Transkripsi gagal (${response.status}). Periksa endpoint, key, dan model Gemini.`);
+      const result = await response.json();
+      const text = result.candidates?.[0]?.content?.parts?.map((part: any) => part.text || '').join('') || '';
+      data = JSON.parse(text.replace(/```json|```/g, '').trim());
+    } else {
+      const form = new FormData();
+      form.append('file', audio, 'clip.webm');
+      form.append('model', sttSettings.model);
+      if (sttSettings.language !== 'auto') form.append('language', sttSettings.language);
+      form.append('response_format', 'verbose_json');
+      form.append('timestamp_granularities[]', sttSettings.timestamps);
+      const response = await fetch(`${baseUrl}/audio/transcriptions`, { method: 'POST', headers: sttSettings.apiKey ? { Authorization: `Bearer ${sttSettings.apiKey}` } : {}, body: form });
+      if (!response.ok) throw new Error(`Transkripsi gagal (${response.status}). Periksa endpoint, API key, model, dan CORS.`);
+      data = await response.json();
+    }
+
+    const rawCues = Array.isArray(data) ? data : sttSettings.timestamps === 'word' && data.words?.length ? data.words : data.segments;
+    const cues: SubtitleCue[] = Array.isArray(rawCues)
+      ? rawCues.map((cue: any) => ({ start: Number(cue.start) || 0, end: Number(cue.end) || actualDuration, text: String(cue.text || cue.word || '').trim() })).filter((cue) => cue.text && cue.end > cue.start)
+      : data.text ? [{ start: 0, end: actualDuration, text: String(data.text) }] : [];
+    if (!cues.length) throw new Error('Provider tidak mengembalikan teks atau timestamp subtitle.');
+    setSubtitleCues(cues);
+    setSubtitleStatus(`${cues.length} subtitle siap.`);
+    return cues;
   };
 
   const stopPreview = () => {
@@ -241,6 +396,11 @@ export const App: React.FC = () => {
     setPreviewState('loading');
 
     try {
+      let activeCues = subtitleCues;
+      if (!activeCues.length) {
+        setSubtitleStatus(`Menyiapkan audio ${actualDuration.toFixed(0)} detik…`);
+        activeCues = await transcribeSelectedClip();
+      }
       if (!previewLandmarkerRef.current) previewLandmarkerRef.current = await createFaceLandmarker();
       video.currentTime = start;
       previewFocusRef.current = { x: 0.5, y: 0.44, frame: 0 };
@@ -290,6 +450,8 @@ export const App: React.FC = () => {
         const sourceX = clamp(focus.x * video.videoWidth - sourceWidth / 2, 0, video.videoWidth - sourceWidth);
         const sourceY = clamp(focus.y * video.videoHeight - sourceHeight / 2, 0, video.videoHeight - sourceHeight);
         context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+        const localTime = video.currentTime - start;
+        drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end));
         focus.frame += 1;
         previewAnimationRef.current = requestAnimationFrame(drawPreview);
       };
@@ -331,6 +493,11 @@ export const App: React.FC = () => {
 
     let faceLandmarker: FaceLandmarker | null = null;
     try {
+      let activeCues = subtitleCues;
+      if (!activeCues.length && sttSettings.baseUrl && sttSettings.model && sttSettings.provider) {
+        setExportLabel(`Menyiapkan subtitle ${actualDuration.toFixed(0)} detik…`);
+        activeCues = await transcribeSelectedClip();
+      }
       faceLandmarker = await createFaceLandmarker();
       setExportLabel('Mendeteksi wajah pembicara…');
       await new Promise<void>((resolve, reject) => {
@@ -422,6 +589,8 @@ export const App: React.FC = () => {
           const sourceX = clamp(focusX * renderVideo.videoWidth - sourceWidth / 2, 0, renderVideo.videoWidth - sourceWidth);
           const sourceY = clamp(focusY * renderVideo.videoHeight - sourceHeight / 2, 0, renderVideo.videoHeight - sourceHeight);
           context.drawImage(renderVideo, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+          const localTime = renderVideo.currentTime - start;
+          drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end));
           frameIndex += 1;
           setProgress(clamp(((performance.now() - startedAt) / 1000 / actualDuration) * 100, 0, 99));
           requestAnimationFrame(draw);
@@ -546,6 +715,7 @@ export const App: React.FC = () => {
               </div>
 
               {error && <p className="error-message" role="alert">{error}</p>}
+              {subtitleStatus && <p className="subtitle-status" role="status">{subtitleStatus}</p>}
               {exportState === 'exporting' && <div className="progress-wrap" aria-live="polite"><div className="progress-meta"><span>{exportLabel}</span><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><span style={{ transform: `scaleX(${progress / 100})` }} /></div></div>}
               {exportState === 'done' && <p className="success-message" role="status">Klip selesai dan sudah diunduh.</p>}
 
@@ -623,10 +793,11 @@ export const App: React.FC = () => {
               </div>
 
               {connectionState !== 'idle' && <p className={`connection-message is-${connectionState}`} role="status">{connectionMessage}</p>}
+              {connectionState === 'idle' && <p className="settings-check-hint">Cek pengaturan terlebih dahulu. Tombol simpan akan aktif jika koneksi berhasil.</p>}
 
               <footer className="settings-actions">
-                <button className="button button-secondary" type="button" onClick={testSttConnection} disabled={connectionState === 'testing'}>{connectionState === 'testing' ? 'Menguji…' : 'Tes koneksi'}</button>
-                <button className="button button-primary" type="submit">Simpan pengaturan</button>
+                <button className="button button-secondary" type="button" onClick={testSttConnection} disabled={connectionState === 'testing'}>{connectionState === 'testing' ? 'Memeriksa…' : settingsVerified ? 'Cek ulang' : 'Cek pengaturan'}</button>
+                <button className="button button-primary" type="submit" disabled={!settingsVerified}>Simpan pengaturan</button>
               </footer>
             </form>
           </section>
