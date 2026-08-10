@@ -8,6 +8,7 @@ type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
 interface SttSettings {
   baseUrl: string;
   apiKey: string;
+  apiFormat: 'openai' | 'gemini' | 'custom';
   provider: string;
   model: string;
   language: string;
@@ -15,24 +16,16 @@ interface SttSettings {
 }
 
 const DEFAULT_STT_SETTINGS: SttSettings = {
-  baseUrl: 'http://localhost:20128/v1',
+  baseUrl: '',
   apiKey: '',
-  provider: 'groq',
-  model: 'whisper-large-v3-turbo',
+  apiFormat: 'openai',
+  provider: '',
+  model: '',
   language: 'id',
   timestamps: 'segment',
 };
 
-const STT_PROVIDERS = [
-  { value: 'groq', label: 'Groq' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'deepgram', label: 'Deepgram' },
-  { value: 'assemblyai', label: 'AssemblyAI' },
-  { value: 'huggingface', label: 'Hugging Face' },
-  { value: 'nvidia', label: 'NVIDIA Parakeet' },
-  { value: 'custom', label: 'Provider lain' },
-];
+const STT_PROVIDER_SUGGESTIONS = ['Gemini', 'OpenAI', 'Groq', 'OpenRouter', '9Router', 'Deepgram', 'AssemblyAI', 'Hugging Face', 'NVIDIA Parakeet'];
 
 const MEDIAPIPE_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm';
 const FACE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
@@ -170,23 +163,29 @@ export const App: React.FC = () => {
 
   const testSttConnection = async () => {
     setConnectionState('testing');
-    setConnectionMessage('Menghubungkan ke 9Router…');
+    setConnectionMessage('Menghubungkan ke API…');
     try {
       const baseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
       if (!/^https?:\/\//i.test(baseUrl)) throw new Error('Endpoint harus dimulai dengan http:// atau https://.');
-      const response = await fetch(`${baseUrl}/models`, {
-        headers: sttSettings.apiKey ? { Authorization: `Bearer ${sttSettings.apiKey}` } : {},
+      const isGemini = sttSettings.apiFormat === 'gemini';
+      const testUrl = isGemini
+        ? `${baseUrl}/models${sttSettings.apiKey ? `?key=${encodeURIComponent(sttSettings.apiKey)}` : ''}`
+        : sttSettings.apiFormat === 'openai' ? `${baseUrl}/models` : baseUrl;
+      const response = await fetch(testUrl, {
+        headers: !isGemini && sttSettings.apiKey ? { Authorization: `Bearer ${sttSettings.apiKey}` } : {},
       });
       if (!response.ok) {
-        if (response.status === 401) throw new Error('API key ditolak oleh 9Router.');
-        throw new Error(`9Router merespons dengan status ${response.status}.`);
+        if (response.status === 401 || response.status === 403) throw new Error('API key ditolak oleh provider.');
+        throw new Error(`API merespons dengan status ${response.status}.`);
       }
       setConnectionState('success');
-      setConnectionMessage('Terhubung ke 9Router. Endpoint dan API key valid.');
+      setConnectionMessage(sttSettings.apiFormat === 'custom'
+        ? 'Endpoint dapat dijangkau. Validasi API key untuk format custom dilakukan saat transkripsi.'
+        : 'Terhubung. Endpoint dan API key dapat digunakan.');
     } catch (caught) {
       setConnectionState('error');
       const detail = caught instanceof Error ? caught.message : 'Koneksi gagal.';
-      setConnectionMessage(`${detail} Pastikan 9Router aktif dan mengizinkan akses browser (CORS).`);
+      setConnectionMessage(`${detail} Pastikan endpoint benar dan provider mengizinkan akses browser (CORS).`);
     }
   };
 
@@ -572,15 +571,15 @@ export const App: React.FC = () => {
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
           <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
             <header className="settings-header">
-              <div><p className="settings-kicker">PENGATURAN</p><h2 id="settings-title">Speech-to-Text</h2><p>Hubungkan KHAN CLIP dengan 9Router lokal.</p></div>
+              <div><p className="settings-kicker">PENGATURAN</p><h2 id="settings-title">Speech-to-Text</h2><p>Hubungkan penyedia AI yang ingin Anda gunakan.</p></div>
               <button className="icon-button" type="button" onClick={() => setSettingsOpen(false)} aria-label="Tutup pengaturan"><CloseIcon /></button>
             </header>
 
             <form className="settings-form" onSubmit={saveSttSettings}>
               <div className="settings-field settings-field-wide">
-                <label htmlFor="stt-endpoint">Endpoint 9Router</label>
-                <input id="stt-endpoint" type="url" value={sttSettings.baseUrl} onChange={(event) => setSttSettings({ ...sttSettings, baseUrl: event.target.value })} required />
-                <small>Default lokal: http://localhost:20128/v1</small>
+                <label htmlFor="stt-endpoint">API endpoint</label>
+                <input id="stt-endpoint" type="url" value={sttSettings.baseUrl} onChange={(event) => setSttSettings({ ...sttSettings, baseUrl: event.target.value })} placeholder="https://… atau http://localhost:…" required />
+                <small>Isi endpoint dari Gemini, OpenAI, Groq, OpenRouter, 9Router, atau provider lain.</small>
               </div>
 
               <div className="settings-field settings-field-wide">
@@ -589,16 +588,24 @@ export const App: React.FC = () => {
                 <small>Disimpan hanya selama sesi browser dan tidak dimasukkan ke GitHub.</small>
               </div>
 
-              <div className="settings-field">
-                <label htmlFor="stt-provider">Provider</label>
-                <select id="stt-provider" value={sttSettings.provider} onChange={(event) => setSttSettings({ ...sttSettings, provider: event.target.value })}>
-                  {STT_PROVIDERS.map((provider) => <option key={provider.value} value={provider.value}>{provider.label}</option>)}
+              <div className="settings-field settings-field-wide">
+                <label htmlFor="stt-format">Format API</label>
+                <select id="stt-format" value={sttSettings.apiFormat} onChange={(event) => setSttSettings({ ...sttSettings, apiFormat: event.target.value as SttSettings['apiFormat'] })}>
+                  <option value="openai">OpenAI-compatible (OpenAI, Groq, OpenRouter, 9Router)</option>
+                  <option value="gemini">Gemini native</option>
+                  <option value="custom">Custom / provider lainnya</option>
                 </select>
               </div>
 
               <div className="settings-field">
+                <label htmlFor="stt-provider">Nama provider</label>
+                <input id="stt-provider" type="text" list="stt-provider-options" value={sttSettings.provider} onChange={(event) => setSttSettings({ ...sttSettings, provider: event.target.value })} placeholder="Contoh: Gemini" required />
+                <datalist id="stt-provider-options">{STT_PROVIDER_SUGGESTIONS.map((provider) => <option key={provider} value={provider} />)}</datalist>
+              </div>
+
+              <div className="settings-field">
                 <label htmlFor="stt-model">Model ID</label>
-                <input id="stt-model" type="text" value={sttSettings.model} onChange={(event) => setSttSettings({ ...sttSettings, model: event.target.value })} placeholder="whisper-large-v3-turbo" required />
+                <input id="stt-model" type="text" value={sttSettings.model} onChange={(event) => setSttSettings({ ...sttSettings, model: event.target.value })} placeholder="ID model dari provider" required />
               </div>
 
               <div className="settings-field">
