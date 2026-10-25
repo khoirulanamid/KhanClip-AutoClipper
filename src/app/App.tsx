@@ -8,7 +8,7 @@ type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
 interface SttSettings {
   baseUrl: string;
   apiKey: string;
-  apiFormat: 'openai' | 'gemini' | 'custom';
+  apiFormat: 'browser-whisper' | 'openai' | 'gemini' | 'custom';
   provider: string;
   model: string;
   language: string;
@@ -24,9 +24,9 @@ interface SubtitleCue {
 const DEFAULT_STT_SETTINGS: SttSettings = {
   baseUrl: '',
   apiKey: '',
-  apiFormat: 'openai',
-  provider: '',
-  model: '',
+  apiFormat: 'browser-whisper',
+  provider: 'Whisper Web (Bebas API Key)',
+  model: 'Xenova/whisper-tiny',
   language: 'id',
   timestamps: 'segment',
 };
@@ -145,6 +145,39 @@ const CloseIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
 );
 
+const ChatIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+);
+
+let cachedWhisperTranscriber: any = null;
+let currentWhisperModel = '';
+
+const getBrowserWhisper = async (modelName: string, onProgress: (msg: string) => void) => {
+  if (cachedWhisperTranscriber && currentWhisperModel === modelName) {
+    return cachedWhisperTranscriber;
+  }
+
+  currentWhisperModel = modelName;
+  onProgress('Menyiapkan engine Whisper AI di browser…');
+  // @ts-ignore
+  const { pipeline, env } = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js');
+  env.allowRemoteModels = true;
+  env.allowLocalModels = false;
+
+  cachedWhisperTranscriber = await pipeline('automatic-speech-recognition', modelName, {
+    progress_callback: (item: any) => {
+      if (item.status === 'progress') {
+        const f = (item.file || '').replace(/^onnx\//, '');
+        onProgress(`Mengunduh model: ${f} ${Math.round(item.progress || 0)}%`);
+      } else if (item.status === 'ready') {
+        onProgress('Model Whisper siap di browser!');
+      }
+    }
+  });
+
+  return cachedWhisperTranscriber;
+};
+
 export const App: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -174,7 +207,13 @@ export const App: React.FC = () => {
   const [sttSettings, setSttSettings] = useState<SttSettings>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('khanclip-stt-settings') || '{}');
-      return { ...DEFAULT_STT_SETTINGS, ...saved, apiKey: sessionStorage.getItem('khanclip-stt-api-key') || '' };
+      const loaded = { ...DEFAULT_STT_SETTINGS, ...saved, apiKey: sessionStorage.getItem('khanclip-stt-api-key') || '' };
+      if (!saved.apiFormat || (saved.apiFormat === 'openai' && !loaded.apiKey && !loaded.baseUrl)) {
+        loaded.apiFormat = 'browser-whisper';
+        loaded.provider = 'Whisper Web (Bebas API Key)';
+        loaded.model = 'Xenova/whisper-tiny';
+      }
+      return loaded;
     } catch {
       return DEFAULT_STT_SETTINGS;
     }
@@ -189,7 +228,7 @@ export const App: React.FC = () => {
     provider: sttSettings.provider.trim(),
     model: sttSettings.model.trim(),
   });
-  const settingsVerified = connectionState === 'success' && verifiedSettingsKey === currentSettingsKey;
+  const settingsVerified = sttSettings.apiFormat === 'browser-whisper' || (connectionState === 'success' && verifiedSettingsKey === currentSettingsKey);
 
   useEffect(() => () => {
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
@@ -232,6 +271,22 @@ export const App: React.FC = () => {
   const testSttConnection = async () => {
     setConnectionState('testing');
     setVerifiedSettingsKey('');
+
+    if (sttSettings.apiFormat === 'browser-whisper') {
+      setConnectionMessage('Memeriksa kesiapan Web Audio & browser…');
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) throw new Error('Web Audio API tidak didukung pada browser ini.');
+        setVerifiedSettingsKey(currentSettingsKey);
+        setConnectionState('success');
+        setConnectionMessage('Siap. Whisper Web berjalan 100% di browser tanpa API key.');
+      } catch (e: any) {
+        setConnectionState('error');
+        setConnectionMessage(e?.message || 'Gagal menyiapkan engine browser.');
+      }
+      return;
+    }
+
     setConnectionMessage('Menghubungkan ke API…');
     try {
       const baseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
@@ -336,7 +391,94 @@ export const App: React.FC = () => {
     return blob;
   };
 
+  const extractAudioFloat32 = async (url: string, startTime: number, endTime: number): Promise<Float32Array> => {
+    try {
+      const resp = await fetch(url);
+      const arrayBuffer = await resp.arrayBuffer();
+
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+      const targetRate = 16000;
+      const clipDuration = Math.max(0.1, endTime - startTime);
+      const targetLength = Math.ceil(clipDuration * targetRate);
+
+      const resampleCtx = new OfflineAudioContext(1, targetLength, targetRate);
+      const sourceNode = resampleCtx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(resampleCtx.destination);
+      sourceNode.start(0, startTime, clipDuration);
+
+      const renderedBuffer = await resampleCtx.startRendering();
+      audioCtx.close();
+      return renderedBuffer.getChannelData(0);
+    } catch (err) {
+      console.warn('Direct decodeAudioData failed, falling back to recorded audio slice:', err);
+      const audioBlob = await recordSelectedAudio();
+      const audioBytes = await audioBlob.arrayBuffer();
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      const audioBuffer = await audioCtx.decodeAudioData(audioBytes);
+
+      const targetRate = 16000;
+      const targetLength = Math.ceil(audioBuffer.duration * targetRate);
+      const resampleCtx = new OfflineAudioContext(1, targetLength, targetRate);
+      const sourceNode = resampleCtx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(resampleCtx.destination);
+      sourceNode.start(0);
+
+      const renderedBuffer = await resampleCtx.startRendering();
+      audioCtx.close();
+      return renderedBuffer.getChannelData(0);
+    }
+  };
+
   const transcribeSelectedClip = async () => {
+    if (sttSettings.apiFormat === 'browser-whisper') {
+      setSubtitleStatus('Mengekstrak audio klip 16kHz…');
+      const float32Data = await extractAudioFloat32(sourceUrl, start, end);
+
+      setSubtitleStatus('Memuat model Whisper AI di browser…');
+      const transcriber = await getBrowserWhisper(sttSettings.model || 'Xenova/whisper-tiny', (msg: string) => {
+        setSubtitleStatus(msg);
+      });
+
+      setSubtitleStatus('Mentranskripsi subtitle otomatis…');
+      const langParam = sttSettings.language === 'auto'
+        ? null
+        : (sttSettings.language === 'id' ? 'indonesian' : sttSettings.language);
+
+      const output = await transcriber(float32Data, {
+        language: langParam,
+        task: 'transcribe',
+        return_timestamps: true,
+        chunk_length_s: 30,
+        stride_length_s: 5,
+      });
+
+      const rawChunks = output.chunks || (output.text ? [{ text: output.text, timestamp: [0, actualDuration] }] : []);
+      const cues: SubtitleCue[] = rawChunks.map((chunk: any) => {
+        const cStart = Number(chunk.timestamp?.[0]) || 0;
+        const cEnd = Number(chunk.timestamp?.[1]) || actualDuration;
+        return {
+          start: Math.max(0, cStart),
+          end: Math.max(cStart + 0.5, cEnd),
+          text: String(chunk.text || '').trim()
+        };
+      }).filter((cue: SubtitleCue) => cue.text.length > 0);
+
+      if (!cues.length && output.text) {
+        cues.push({ start: 0, end: actualDuration, text: output.text.trim() });
+      }
+
+      if (!cues.length) throw new Error('Tidak ada kata atau percakapan yang terdeteksi pada klip ini.');
+      setSubtitleCues(cues);
+      setSubtitleStatus(`${cues.length} subtitle dibuat oleh Whisper Web (Bebas API Key).`);
+      return cues;
+    }
+
     if (!sttSettings.baseUrl || !sttSettings.model || !sttSettings.provider) throw new Error('Lengkapi endpoint, provider, dan model pada Pengaturan terlebih dahulu.');
     const audio = await recordSelectedAudio();
     setSubtitleStatus('Mengirim audio ke provider…');
@@ -494,7 +636,7 @@ export const App: React.FC = () => {
     let faceLandmarker: FaceLandmarker | null = null;
     try {
       let activeCues = subtitleCues;
-      if (!activeCues.length && sttSettings.baseUrl && sttSettings.model && sttSettings.provider) {
+      if (!activeCues.length && (sttSettings.apiFormat === 'browser-whisper' || (sttSettings.baseUrl && sttSettings.model))) {
         setExportLabel(`Menyiapkan subtitle ${actualDuration.toFixed(0)} detik…`);
         activeCues = await transcribeSelectedClip();
       }
@@ -719,6 +861,17 @@ export const App: React.FC = () => {
               {exportState === 'exporting' && <div className="progress-wrap" aria-live="polite"><div className="progress-meta"><span>{exportLabel}</span><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><span style={{ transform: `scaleX(${progress / 100})` }} /></div></div>}
               {exportState === 'done' && <p className="success-message" role="status">Klip selesai dan sudah diunduh.</p>}
 
+              <div className="subtitle-quick-bar">
+                <button
+                  className="button button-quiet"
+                  type="button"
+                  onClick={() => transcribeSelectedClip()}
+                  disabled={!duration || exportState === 'exporting' || previewState === 'loading'}
+                >
+                  <ChatIcon /> {subtitleCues.length ? `Perbarui Subtitle (${subtitleCues.length} aktif)` : 'Buat Subtitle AI (Bebas API Key)'}
+                </button>
+              </div>
+
               <div className="actions">
                 {previewState === 'playing' ? (
                   <button className="button button-secondary" type="button" onClick={stopPreview}>Hentikan preview</button>
@@ -741,59 +894,101 @@ export const App: React.FC = () => {
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
           <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
             <header className="settings-header">
-              <div><p className="settings-kicker">PENGATURAN</p><h2 id="settings-title">Speech-to-Text</h2><p>Hubungkan penyedia AI yang ingin Anda gunakan.</p></div>
+              <div><p className="settings-kicker">PENGATURAN</p><h2 id="settings-title">Speech-to-Text</h2><p>Pilih mesin AI Whisper di browser atau hubungkan API luar.</p></div>
               <button className="icon-button" type="button" onClick={() => setSettingsOpen(false)} aria-label="Tutup pengaturan"><CloseIcon /></button>
             </header>
 
             <form className="settings-form" onSubmit={saveSttSettings}>
               <div className="settings-field settings-field-wide">
-                <label htmlFor="stt-endpoint">API endpoint</label>
-                <input id="stt-endpoint" type="url" value={sttSettings.baseUrl} onChange={(event) => setSttSettings({ ...sttSettings, baseUrl: event.target.value })} placeholder="https://… atau http://localhost:…" required />
-                <small>Isi endpoint dari Gemini, OpenAI, Groq, OpenRouter, 9Router, atau provider lain.</small>
-              </div>
-
-              <div className="settings-field settings-field-wide">
-                <label htmlFor="stt-key">API key</label>
-                <div className="secret-field"><input id="stt-key" type={showApiKey ? 'text' : 'password'} value={sttSettings.apiKey} onChange={(event) => setSttSettings({ ...sttSettings, apiKey: event.target.value })} autoComplete="off" placeholder="sk-…" /><button type="button" onClick={() => setShowApiKey(!showApiKey)}>{showApiKey ? 'Sembunyikan' : 'Tampilkan'}</button></div>
-                <small>Disimpan hanya selama sesi browser dan tidak dimasukkan ke GitHub.</small>
-              </div>
-
-              <div className="settings-field settings-field-wide">
-                <label htmlFor="stt-format">Format API</label>
-                <select id="stt-format" value={sttSettings.apiFormat} onChange={(event) => setSttSettings({ ...sttSettings, apiFormat: event.target.value as SttSettings['apiFormat'] })}>
-                  <option value="openai">OpenAI-compatible (OpenAI, Groq, OpenRouter, 9Router)</option>
-                  <option value="gemini">Gemini native</option>
-                  <option value="custom">Custom / provider lainnya</option>
+                <label htmlFor="stt-format">Mesin AI / Format STT</label>
+                <select id="stt-format" value={sttSettings.apiFormat} onChange={(event) => {
+                  const nextFormat = event.target.value as SttSettings['apiFormat'];
+                  if (nextFormat === 'browser-whisper') {
+                    setSttSettings({
+                      ...sttSettings,
+                      apiFormat: 'browser-whisper',
+                      provider: 'Whisper Web (Bebas API Key)',
+                      model: 'Xenova/whisper-tiny'
+                    });
+                  } else {
+                    setSttSettings({
+                      ...sttSettings,
+                      apiFormat: nextFormat,
+                      provider: nextFormat === 'openai' ? 'Groq' : sttSettings.provider
+                    });
+                  }
+                }}>
+                  <option value="browser-whisper">⚡ Whisper Web (100% Gratis & Bebas API Key)</option>
+                  <option value="openai">OpenAI-compatible (Groq Whisper, OpenAI, OpenRouter)</option>
+                  <option value="gemini">Google Gemini native</option>
+                  <option value="custom">Custom / Provider lain</option>
                 </select>
               </div>
 
+              {sttSettings.apiFormat === 'browser-whisper' ? (
+                <div className="settings-field settings-field-wide whisper-banner">
+                  <div className="whisper-banner-header">
+                    <span className="status-dot" />
+                    <strong>Mode 100% Client-Side Aktif (Gratis Selamanya)</strong>
+                  </div>
+                  <p>Model Whisper berjalan langsung di dalam memori browser Anda (WASM/WebGPU). Tidak memerlukan API key, tanpa kuota batas, dan audio Anda tidak dikirim ke server luar.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="settings-field settings-field-wide">
+                    <label htmlFor="stt-endpoint">API endpoint</label>
+                    <input id="stt-endpoint" type="url" value={sttSettings.baseUrl} onChange={(event) => setSttSettings({ ...sttSettings, baseUrl: event.target.value })} placeholder="https://… atau http://localhost:…" required />
+                    <small>Isi endpoint dari Groq (https://api.groq.com/openai/v1), Gemini, OpenAI, dll.</small>
+                  </div>
+
+                  <div className="settings-field settings-field-wide">
+                    <label htmlFor="stt-key">API key</label>
+                    <div className="secret-field">
+                      <input id="stt-key" type={showApiKey ? 'text' : 'password'} value={sttSettings.apiKey} onChange={(event) => setSttSettings({ ...sttSettings, apiKey: event.target.value })} autoComplete="off" placeholder="sk-…" />
+                      <button type="button" onClick={() => setShowApiKey(!showApiKey)}>{showApiKey ? 'Sembunyikan' : 'Tampilkan'}</button>
+                    </div>
+                    <small>Disimpan hanya selama sesi browser dan tidak dimasukkan ke GitHub.</small>
+                  </div>
+                </>
+              )}
+
               <div className="settings-field">
                 <label htmlFor="stt-provider">Nama provider</label>
-                <input id="stt-provider" type="text" list="stt-provider-options" value={sttSettings.provider} onChange={(event) => setSttSettings({ ...sttSettings, provider: event.target.value })} placeholder="Contoh: Gemini" required />
+                <input id="stt-provider" type="text" list="stt-provider-options" value={sttSettings.provider} onChange={(event) => setSttSettings({ ...sttSettings, provider: event.target.value })} placeholder="Contoh: Whisper Web" required />
                 <datalist id="stt-provider-options">{STT_PROVIDER_SUGGESTIONS.map((provider) => <option key={provider} value={provider} />)}</datalist>
               </div>
 
               <div className="settings-field">
-                <label htmlFor="stt-model">Model ID</label>
-                <input id="stt-model" type="text" value={sttSettings.model} onChange={(event) => setSttSettings({ ...sttSettings, model: event.target.value })} placeholder="ID model dari provider" required />
+                <label htmlFor="stt-model">{sttSettings.apiFormat === 'browser-whisper' ? 'Ukuran Model Whisper' : 'Model ID'}</label>
+                {sttSettings.apiFormat === 'browser-whisper' ? (
+                  <select id="stt-model" value={sttSettings.model} onChange={(event) => setSttSettings({ ...sttSettings, model: event.target.value })}>
+                    <option value="Xenova/whisper-tiny">Whisper Tiny (~39 MB, Cepat & Ringan)</option>
+                    <option value="Xenova/whisper-base">Whisper Base (~74 MB, Lebih Teliti)</option>
+                  </select>
+                ) : (
+                  <input id="stt-model" type="text" value={sttSettings.model} onChange={(event) => setSttSettings({ ...sttSettings, model: event.target.value })} placeholder="Contoh: whisper-large-v3" required />
+                )}
               </div>
 
               <div className="settings-field">
                 <label htmlFor="stt-language">Bahasa audio</label>
                 <select id="stt-language" value={sttSettings.language} onChange={(event) => setSttSettings({ ...sttSettings, language: event.target.value })}>
-                  <option value="auto">Deteksi otomatis</option><option value="id">Bahasa Indonesia</option><option value="en">English</option>
+                  <option value="id">Bahasa Indonesia</option>
+                  <option value="auto">Deteksi otomatis</option>
+                  <option value="en">English</option>
                 </select>
               </div>
 
               <div className="settings-field">
                 <label htmlFor="stt-timestamps">Timestamp subtitle</label>
                 <select id="stt-timestamps" value={sttSettings.timestamps} onChange={(event) => setSttSettings({ ...sttSettings, timestamps: event.target.value as SttSettings['timestamps'] })}>
-                  <option value="segment">Per kalimat (lebih ringan)</option><option value="word">Per kata (lebih detail)</option>
+                  <option value="segment">Per kalimat (lebih rapi)</option>
+                  <option value="word">Per kata (lebih rapat)</option>
                 </select>
               </div>
 
               {connectionState !== 'idle' && <p className={`connection-message is-${connectionState}`} role="status">{connectionMessage}</p>}
-              {connectionState === 'idle' && <p className="settings-check-hint">Cek pengaturan terlebih dahulu. Tombol simpan akan aktif jika koneksi berhasil.</p>}
+              {connectionState === 'idle' && sttSettings.apiFormat !== 'browser-whisper' && <p className="settings-check-hint">Cek pengaturan terlebih dahulu. Tombol simpan akan aktif jika koneksi berhasil.</p>}
 
               <footer className="settings-actions">
                 <button className="button button-secondary" type="button" onClick={testSttConnection} disabled={connectionState === 'testing'}>{connectionState === 'testing' ? 'Memeriksa…' : settingsVerified ? 'Cek ulang' : 'Cek pengaturan'}</button>

@@ -7,8 +7,8 @@ Aplikasi web modern berbasis AI untuk memotong video lanskap (16:9) menjadi vide
 ## ✨ Fitur Unggulan
 
 - 🎯 **AI Face Tracking Real-Time:** Menggunakan Google MediaPipe `FaceLandmarker` untuk mendeteksi pembicara aktif dan mengarahkan fokus kamera 9:16 secara mulus (*smooth lerp interpolation*).
-- 💬 **Universal AI Subtitle:** Terhubung ke provider STT (Gemini, Groq Whisper, OpenAI Whisper, Deepgram, OpenRouter) dengan subtitle yang dibakar (*hardsub*) langsung di atas video.
-- 🔒 **100% Client-Side & Privasi Aman:** Seluruh pemrosesan render video dan crop wajah berjalan lokal di browser perangkat Anda tanpa server perantara.
+- 💬 **Subtitle Whisper Web (Bebas API Key):** Menggunakan model AI Whisper langsung di dalam browser (WASM/WebGPU) tanpa perlu API key, tanpa kuota, dan 100% gratis selamanya. Mendukung pula provider cloud (Groq Whisper, Gemini, OpenAI).
+- 🔒 **100% Client-Side & Privasi Aman:** Seluruh pemrosesan render video, crop wajah, dan transkripsi subtitle berjalan lokal di browser perangkat Anda tanpa server perantara.
 
 ---
 
