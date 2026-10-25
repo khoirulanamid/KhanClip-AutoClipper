@@ -28,6 +28,8 @@ export type SubtitleSize = 'normal' | 'large' | 'huge';
 export interface SubtitleStyleSettings {
   preset: SubtitlePreset;
   position: SubtitlePosition;
+  posY: number;
+  posX: number;
   size: SubtitleSize;
   uppercase: boolean;
 }
@@ -35,8 +37,28 @@ export interface SubtitleStyleSettings {
 const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   preset: 'tiktok-yellow',
   position: 'bottom',
+  posY: 0.78,
+  posX: 0.50,
   size: 'normal',
   uppercase: true,
+};
+
+export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
+
+export interface WatermarkSettings {
+  enabled: boolean;
+  text: string;
+  position: WatermarkPosition;
+  opacity: number;
+  size: 'small' | 'medium' | 'large';
+}
+
+const DEFAULT_WATERMARK_STYLE: WatermarkSettings = {
+  enabled: false,
+  text: '@khanclip',
+  position: 'top-right',
+  opacity: 0.8,
+  size: 'medium',
 };
 
 const DEFAULT_STT_SETTINGS: SttSettings = {
@@ -158,10 +180,14 @@ const drawSubtitle = (
   const lineHeight = fontSize * 1.25;
   const totalTextHeight = visibleLines.length * lineHeight;
 
-  // Position
-  let centerY = canvas.height * 0.78;
-  if (styleSettings.position === 'center') centerY = canvas.height * 0.52;
-  if (styleSettings.position === 'top') centerY = canvas.height * 0.28;
+  // Position (Free placement anywhere on canvas)
+  const centerY = styleSettings.posY !== undefined
+    ? canvas.height * styleSettings.posY
+    : (styleSettings.position === 'center' ? canvas.height * 0.52 : (styleSettings.position === 'top' ? canvas.height * 0.28 : canvas.height * 0.78));
+
+  const centerX = styleSettings.posX !== undefined
+    ? canvas.width * styleSettings.posX
+    : canvas.width / 2;
 
   // 1. Preset: Capsule Dark
   if (styleSettings.preset === 'capsule-dark') {
@@ -169,12 +195,12 @@ const drawSubtitle = (
     const boxWidth = Math.min(canvas.width * 0.90, Math.max(...visibleLines.map((l) => context.measureText(l).width)) + fontSize * 1.4);
     context.fillStyle = 'rgba(15, 17, 21, 0.78)';
     context.beginPath();
-    context.roundRect(canvas.width / 2 - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight, fontSize * 0.35);
+    context.roundRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight, fontSize * 0.35);
     context.fill();
 
     context.fillStyle = '#ffffff';
     visibleLines.forEach((text, index) => {
-      context.fillText(text, canvas.width / 2, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight);
+      context.fillText(text, centerX, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight);
     });
   }
 
@@ -188,11 +214,11 @@ const drawSubtitle = (
       context.lineWidth = Math.max(5, fontSize * 0.18);
       context.lineJoin = 'miter';
       context.miterLimit = 2;
-      context.strokeText(text, canvas.width / 2, lineY);
+      context.strokeText(text, centerX, lineY);
 
       // Bright yellow fill
       context.fillStyle = '#FFE600';
-      context.fillText(text, canvas.width / 2, lineY);
+      context.fillText(text, centerX, lineY);
     });
   }
 
@@ -207,10 +233,10 @@ const drawSubtitle = (
       const lineY = centerY + (index - (visibleLines.length - 1) / 2) * lineHeight;
       context.strokeStyle = 'rgba(0, 0, 0, 0.5)';
       context.lineWidth = Math.max(3, fontSize * 0.08);
-      context.strokeText(text, canvas.width / 2, lineY);
+      context.strokeText(text, centerX, lineY);
 
       context.fillStyle = '#FFFFFF';
-      context.fillText(text, canvas.width / 2, lineY);
+      context.fillText(text, centerX, lineY);
     });
   }
 
@@ -221,12 +247,12 @@ const drawSubtitle = (
 
       context.strokeStyle = '#000000';
       context.lineWidth = Math.max(4, fontSize * 0.16);
-      context.strokeText(text, canvas.width / 2, lineY);
+      context.strokeText(text, centerX, lineY);
 
       context.fillStyle = '#00F0FF';
       context.shadowColor = 'rgba(0, 240, 255, 0.7)';
       context.shadowBlur = 15;
-      context.fillText(text, canvas.width / 2, lineY);
+      context.fillText(text, centerX, lineY);
     });
   }
 
@@ -236,17 +262,107 @@ const drawSubtitle = (
     const boxWidth = Math.min(canvas.width * 0.90, Math.max(...visibleLines.map((l) => context.measureText(l).width)) + fontSize * 1.3);
     context.fillStyle = '#DC2626';
     context.beginPath();
-    context.roundRect(canvas.width / 2 - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight, 8);
+    context.roundRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight, 8);
     context.fill();
 
     context.fillStyle = '#FFFFFF';
     visibleLines.forEach((text, index) => {
-      context.fillText(text, canvas.width / 2, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight);
+      context.fillText(text, centerX, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight);
     });
   }
 
   context.restore();
 };
+
+const drawWatermark = (
+  context: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  watermark: WatermarkSettings = DEFAULT_WATERMARK_STYLE
+) => {
+  if (!watermark.enabled || !watermark.text.trim()) return;
+
+  context.save();
+  let fontSize = Math.max(18, Math.round(canvas.width * 0.034));
+  if (watermark.size === 'small') fontSize = Math.max(14, Math.round(canvas.width * 0.024));
+  if (watermark.size === 'large') fontSize = Math.max(24, Math.round(canvas.width * 0.046));
+
+  context.font = `700 ${fontSize}px "Plus Jakarta Sans", "Inter", sans-serif`;
+  context.textBaseline = 'middle';
+  context.fillStyle = `rgba(255, 255, 255, ${watermark.opacity})`;
+  context.shadowColor = 'rgba(0, 0, 0, 0.75)';
+  context.shadowBlur = 8;
+  context.shadowOffsetX = 1;
+  context.shadowOffsetY = 1;
+
+  const marginX = canvas.width * 0.06;
+  const marginY = canvas.height * 0.05;
+
+  let x = canvas.width - marginX;
+  let y = marginY;
+  context.textAlign = 'right';
+
+  if (watermark.position === 'top-left') {
+    x = marginX;
+    y = marginY;
+    context.textAlign = 'left';
+  } else if (watermark.position === 'top-right') {
+    x = canvas.width - marginX;
+    y = marginY;
+    context.textAlign = 'right';
+  } else if (watermark.position === 'bottom-left') {
+    x = marginX;
+    y = canvas.height - marginY;
+    context.textAlign = 'left';
+  } else if (watermark.position === 'bottom-right') {
+    x = canvas.width - marginX;
+    y = canvas.height - marginY;
+    context.textAlign = 'right';
+  } else if (watermark.position === 'center') {
+    x = canvas.width / 2;
+    y = canvas.height / 2;
+    context.textAlign = 'center';
+  }
+
+  context.fillText(watermark.text.trim(), x, y);
+  context.restore();
+};
+
+const ExpandIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const PlayIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" />
+  </svg>
+);
+
+const PauseIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="6" y="4" width="4" height="16" fill="currentColor" />
+    <rect x="14" y="4" width="4" height="16" fill="currentColor" />
+  </svg>
+);
+
+const MoveIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <polyline points="5 9 2 12 5 15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <polyline points="9 5 12 2 15 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <polyline points="15 19 12 22 9 19" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <polyline points="19 9 22 12 19 15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+);
+
+const TagIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="7" cy="7" r="1.5" fill="currentColor" />
+  </svg>
+);
 
 const FilmIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>
@@ -327,6 +443,21 @@ export const App: React.FC = () => {
   const [verifiedSettingsKey, setVerifiedSettingsKey] = useState('');
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [subtitleStatus, setSubtitleStatus] = useState('');
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioTab, setStudioTab] = useState<'subtitles' | 'position' | 'watermark'>('subtitles');
+  const [currentTimeProgress, setCurrentTimeProgress] = useState(0);
+  const studioCanvasRef = useRef<HTMLCanvasElement>(null);
+  const isDraggingSubtitle = useRef(false);
+
+  const [watermarkStyle, setWatermarkStyle] = useState<WatermarkSettings>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('khanclip-watermark-style') || '{}');
+      return { ...DEFAULT_WATERMARK_STYLE, ...saved };
+    } catch {
+      return DEFAULT_WATERMARK_STYLE;
+    }
+  });
+
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('khanclip-subtitle-style') || '{}');
@@ -336,40 +467,123 @@ export const App: React.FC = () => {
     }
   });
 
-  const redrawCurrentPreviewFrame = (style = subtitleStyle) => {
+  const redrawCurrentPreviewFrame = (
+    style = subtitleStyle,
+    wm = watermarkStyle,
+    cues = subtitleCues
+  ) => {
     const video = videoRef.current;
-    const canvas = previewCanvasRef.current;
-    const context = canvas?.getContext('2d');
-    if (!video || !canvas || !context || video.readyState < 1) return;
+    if (!video || video.readyState < 1) return;
 
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = 'high';
+    const render = (canvas: HTMLCanvasElement | null) => {
+      if (!canvas) return;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
 
-    const focus = previewFocusRef.current;
-    const targetAspect = 9 / 16;
-    const sourceAspect = video.videoWidth / video.videoHeight;
-    let sourceWidth = video.videoWidth;
-    let sourceHeight = video.videoHeight;
-    if (sourceAspect > targetAspect) sourceWidth = sourceHeight * targetAspect;
-    else sourceHeight = sourceWidth / targetAspect;
-    const sourceX = clamp(focus.x * video.videoWidth - sourceWidth / 2, 0, video.videoWidth - sourceWidth);
-    const sourceY = clamp(focus.y * video.videoHeight - sourceHeight / 2, 0, video.videoHeight - sourceHeight);
-    context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+      const focus = previewFocusRef.current;
+      const targetAspect = 9 / 16;
+      const sourceAspect = video.videoWidth / video.videoHeight;
+      let sourceWidth = video.videoWidth;
+      let sourceHeight = video.videoHeight;
+      if (sourceAspect > targetAspect) sourceWidth = sourceHeight * targetAspect;
+      else sourceHeight = sourceWidth / targetAspect;
+      const sourceX = clamp(focus.x * video.videoWidth - sourceWidth / 2, 0, video.videoWidth - sourceWidth);
+      const sourceY = clamp(focus.y * video.videoHeight - sourceHeight / 2, 0, video.videoHeight - sourceHeight);
+      context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
 
-    const localTime = Math.max(0, video.currentTime - start);
-    const activeCue = subtitleCues.find((cue) => localTime >= cue.start && localTime < cue.end)
-      || (subtitleCues.length ? subtitleCues[0] : { start: 0, end: 10, text: 'Contoh Gaya Subtitle' });
+      const localTime = Math.max(0, video.currentTime - start);
+      const activeCue = cues.find((cue) => localTime >= cue.start && localTime < cue.end)
+        || (cues.length ? cues[0] : { start: 0, end: 10, text: 'Contoh Gaya Subtitle' });
 
-    drawSubtitle(context, canvas, activeCue, style);
+      drawSubtitle(context, canvas, activeCue, style);
+      drawWatermark(context, canvas, wm);
+    };
+
+    render(previewCanvasRef.current);
+    render(studioCanvasRef.current);
   };
 
   const updateSubtitleStyle = (next: Partial<SubtitleStyleSettings>) => {
     setSubtitleStyle((prev) => {
       const updated = { ...prev, ...next };
       localStorage.setItem('khanclip-subtitle-style', JSON.stringify(updated));
-      setTimeout(() => redrawCurrentPreviewFrame(updated), 10);
+      setTimeout(() => redrawCurrentPreviewFrame(updated, watermarkStyle, subtitleCues), 10);
       return updated;
     });
+  };
+
+  const updateWatermarkStyle = (next: Partial<WatermarkSettings>) => {
+    setWatermarkStyle((prev) => {
+      const updated = { ...prev, ...next };
+      localStorage.setItem('khanclip-watermark-style', JSON.stringify(updated));
+      setTimeout(() => redrawCurrentPreviewFrame(subtitleStyle, updated, subtitleCues), 10);
+      return updated;
+    });
+  };
+
+  const updateCue = (index: number, next: Partial<SubtitleCue>) => {
+    setSubtitleCues((prev) => {
+      const updated = [...prev];
+      if (updated[index]) {
+        updated[index] = { ...updated[index], ...next };
+      }
+      setTimeout(() => redrawCurrentPreviewFrame(subtitleStyle, watermarkStyle, updated), 10);
+      return updated;
+    });
+  };
+
+  const deleteCue = (index: number) => {
+    setSubtitleCues((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      setTimeout(() => redrawCurrentPreviewFrame(subtitleStyle, watermarkStyle, updated), 10);
+      return updated;
+    });
+  };
+
+  const handleAddSubtitleLine = () => {
+    const video = videoRef.current;
+    const currentT = video ? Math.max(0, video.currentTime - start) : 0;
+    const newStart = Math.round(currentT * 10) / 10;
+    const newEnd = Math.round(Math.min(actualDuration, newStart + 2.5) * 10) / 10;
+
+    setSubtitleCues((prev) => {
+      const updated = [...prev, { start: newStart, end: newEnd, text: 'Teks Subtitle Baru' }];
+      updated.sort((a, b) => a.start - b.start);
+      setTimeout(() => redrawCurrentPreviewFrame(subtitleStyle, watermarkStyle, updated), 10);
+      return updated;
+    });
+  };
+
+  const seekToCue = (cueStart: number) => {
+    const video = videoRef.current;
+    if (video) {
+      video.currentTime = start + cueStart;
+      setCurrentTimeProgress(start + cueStart);
+      setTimeout(() => redrawCurrentPreviewFrame(), 30);
+    }
+  };
+
+  const handleScrub = (newTime: number) => {
+    const video = videoRef.current;
+    if (video) {
+      video.currentTime = clamp(newTime, start, end);
+      setCurrentTimeProgress(video.currentTime);
+      setTimeout(() => redrawCurrentPreviewFrame(), 20);
+    }
+  };
+
+  const handleCanvasDragMove = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (!isDraggingSubtitle.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+    const relX = clamp((clientX - rect.left) / rect.width, 0.15, 0.85);
+    const relY = clamp((clientY - rect.top) / rect.height, 0.10, 0.90);
+
+    updateSubtitleStyle({ posX: relX, posY: relY });
   };
 
   const [sttSettings, setSttSettings] = useState<SttSettings>(() => {
@@ -759,9 +973,25 @@ export const App: React.FC = () => {
         else sourceHeight = sourceWidth / targetAspect;
         const sourceX = clamp(focus.x * video.videoWidth - sourceWidth / 2, 0, video.videoWidth - sourceWidth);
         const sourceY = clamp(focus.y * video.videoHeight - sourceHeight / 2, 0, video.videoHeight - sourceHeight);
-        context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+
         const localTime = video.currentTime - start;
-        drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end), subtitleStyle);
+        setCurrentTimeProgress(video.currentTime);
+        const activeCue = activeCues.find((cue) => localTime >= cue.start && localTime < cue.end);
+
+        const renderFrame = (targetCanvas: HTMLCanvasElement | null) => {
+          if (!targetCanvas) return;
+          const ctx = targetCanvas.getContext('2d');
+          if (!ctx) return;
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, targetCanvas.width, targetCanvas.height);
+          drawSubtitle(ctx, targetCanvas, activeCue, subtitleStyle);
+          drawWatermark(ctx, targetCanvas, watermarkStyle);
+        };
+
+        renderFrame(canvas);
+        renderFrame(studioCanvasRef.current);
+
         focus.frame += 1;
         previewAnimationRef.current = requestAnimationFrame(drawPreview);
       };
@@ -774,9 +1004,13 @@ export const App: React.FC = () => {
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
-    if (video && video.currentTime >= end) {
-      video.pause();
-      video.currentTime = start;
+    if (video) {
+      setCurrentTimeProgress(video.currentTime);
+      if (video.currentTime >= end) {
+        video.pause();
+        video.currentTime = start;
+        setCurrentTimeProgress(start);
+      }
     }
   };
 
@@ -901,6 +1135,7 @@ export const App: React.FC = () => {
           context.drawImage(renderVideo, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
           const localTime = renderVideo.currentTime - start;
           drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end), subtitleStyle);
+          drawWatermark(context, canvas, watermarkStyle);
           frameIndex += 1;
           setProgress(clamp(((performance.now() - startedAt) / 1000 / actualDuration) * 100, 0, 99));
           requestAnimationFrame(draw);
@@ -984,11 +1219,37 @@ export const App: React.FC = () => {
                   setDuration(nextDuration);
                   setClipDuration(Math.min(30, nextDuration));
                 }} /></div></div>
-                <div><span className="preview-label">HASIL TIKTOK · 9:16</span><div className="tiktok-frame">
-                  <canvas ref={previewCanvasRef} width={1080} height={1920} aria-label="Preview vertikal hasil tracking wajah" />
-                  {previewState === 'idle' && <span className="preview-placeholder">Klik “Lihat preview” untuk menampilkan hasil</span>}
-                  {previewState === 'loading' && <span className="preview-placeholder">Memuat pelacak wajah…</span>}
-                </div></div>
+                <div>
+                  <div className="preview-label-row">
+                    <span className="preview-label">HASIL TIKTOK · 9:16</span>
+                    <button
+                      type="button"
+                      className="expand-studio-btn"
+                      onClick={() => { setStudioOpen(true); setTimeout(() => redrawCurrentPreviewFrame(), 50); }}
+                      title="Perbesar & Buka Studio Editor"
+                    >
+                      <ExpandIcon /> Perbesar & Edit Studio
+                    </button>
+                  </div>
+                  <div
+                    className="tiktok-frame is-clickable"
+                    onClick={() => { setStudioOpen(true); setTimeout(() => redrawCurrentPreviewFrame(), 50); }}
+                    title="Klik untuk memperbesar dan membuka Studio Editor"
+                  >
+                    <canvas ref={previewCanvasRef} width={1080} height={1920} aria-label="Preview vertikal hasil tracking wajah" />
+                    {previewState === 'idle' && (
+                      <span className="preview-placeholder">
+                        <ExpandIcon />
+                        <strong>Klik untuk Perbesar & Edit</strong>
+                        <small>Buka Studio Subtitle & Watermark</small>
+                      </span>
+                    )}
+                    {previewState === 'loading' && <span className="preview-placeholder">Memuat pelacak wajah…</span>}
+                    <div className="tiktok-hover-hint">
+                      <span>🔍 Klik untuk Perbesar & Edit</span>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="file-row">
                 <div className="file-copy"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(1)} MB · Durasi {formatTime(duration)}</span></div>
@@ -1180,6 +1441,474 @@ export const App: React.FC = () => {
           </section>
         )}
       </main>
+
+      {studioOpen && (
+        <div
+          className="modal-backdrop studio-backdrop"
+          role="presentation"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setStudioOpen(false); }}
+        >
+          <section className="studio-dialog" role="dialog" aria-modal="true" aria-labelledby="studio-title">
+            <header className="studio-header">
+              <div className="studio-header-copy">
+                <span className="settings-kicker">STUDIO EDITOR 9:16</span>
+                <h2 id="studio-title">Studio Subtitle & Watermark</h2>
+                <p>Klik teks subtitle untuk mengedit kata, geser letak teks bebas di layar, dan tambahkan watermark.</p>
+              </div>
+              <div className="studio-header-actions">
+                <button
+                  className="button button-primary studio-export-btn"
+                  type="button"
+                  onClick={exportClip}
+                  disabled={!duration || exportState === 'exporting'}
+                >
+                  <ScissorsIcon /> Potong & Unduh
+                </button>
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => setStudioOpen(false)}
+                  aria-label="Tutup studio"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            </header>
+
+            <div className="studio-body">
+              {/* Left Column: Big Interactive 9:16 Screen */}
+              <div className="studio-player-col">
+                <div
+                  className="studio-canvas-wrap"
+                  onMouseDown={(e) => { isDraggingSubtitle.current = true; handleCanvasDragMove(e); }}
+                  onMouseMove={handleCanvasDragMove}
+                  onMouseUp={() => { isDraggingSubtitle.current = false; }}
+                  onTouchStart={(e) => { isDraggingSubtitle.current = true; handleCanvasDragMove(e); }}
+                  onTouchMove={handleCanvasDragMove}
+                  onTouchEnd={() => { isDraggingSubtitle.current = false; }}
+                  title="Klik & geser untuk memindahkan teks subtitle ke mana saja"
+                >
+                  <canvas ref={studioCanvasRef} width={1080} height={1920} className="studio-canvas" />
+                  <div className="canvas-drag-hint">
+                    <span><MoveIcon /> Klik & geser subtitle ke mana saja</span>
+                  </div>
+                </div>
+
+                <div className="studio-player-bar">
+                  <button
+                    type="button"
+                    className="studio-play-btn"
+                    onClick={previewState === 'playing' ? stopPreview : previewFromStart}
+                  >
+                    {previewState === 'playing' ? <PauseIcon /> : <PlayIcon />}
+                    <span>{previewState === 'playing' ? 'Jeda' : 'Putar'}</span>
+                  </button>
+
+                  <div className="studio-timeline-wrap">
+                    <span className="time-tag">
+                      {formatTime(Math.max(0, currentTimeProgress - start))} / {formatTime(actualDuration)}
+                    </span>
+                    <input
+                      className="timeline"
+                      type="range"
+                      min={start}
+                      max={end}
+                      step="0.05"
+                      value={clamp(currentTimeProgress, start, end)}
+                      onChange={(e) => handleScrub(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Tabbed Tools */}
+              <div className="studio-tools-col">
+                <div className="studio-tabs" role="tablist">
+                  <button
+                    type="button"
+                    className={`studio-tab-btn ${studioTab === 'subtitles' ? 'is-active' : ''}`}
+                    onClick={() => setStudioTab('subtitles')}
+                  >
+                    <ChatIcon /> Subtitle ({subtitleCues.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-btn ${studioTab === 'position' ? 'is-active' : ''}`}
+                    onClick={() => setStudioTab('position')}
+                  >
+                    <MoveIcon /> Letak & Gaya
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-btn ${studioTab === 'watermark' ? 'is-active' : ''}`}
+                    onClick={() => setStudioTab('watermark')}
+                  >
+                    <TagIcon /> Watermark
+                  </button>
+                </div>
+
+                <div className="studio-tab-content">
+                  {/* Tab 1: Subtitle Cue Editor */}
+                  {studioTab === 'subtitles' && (
+                    <div className="subtitle-editor-pane">
+                      <div className="editor-pane-toolbar">
+                        <span><strong>{subtitleCues.length}</strong> kalimat terdaftar</span>
+                        <div className="toolbar-buttons">
+                          <button
+                            type="button"
+                            className="button button-quiet button-sm"
+                            onClick={() => transcribeSelectedClip()}
+                            disabled={previewState === 'loading'}
+                          >
+                            ⚡ Auto Subtitle AI
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary button-sm"
+                            onClick={handleAddSubtitleLine}
+                          >
+                            + Tambah Baris
+                          </button>
+                        </div>
+                      </div>
+
+                      {subtitleCues.length === 0 ? (
+                        <div className="empty-subtitles-card">
+                          <ChatIcon />
+                          <p>Belum ada subtitle pada klip ini.</p>
+                          <button
+                            type="button"
+                            className="button button-primary button-sm"
+                            onClick={() => transcribeSelectedClip()}
+                          >
+                            Buat Subtitle AI Sekarang
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="subtitle-cues-list">
+                          {subtitleCues.map((cue, idx) => (
+                            <div key={idx} className="cue-row">
+                              <div className="cue-timing">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  max={actualDuration}
+                                  value={Number(cue.start.toFixed(1))}
+                                  onChange={(e) => updateCue(idx, { start: Math.max(0, Number(e.target.value)) })}
+                                  title="Detik mulai"
+                                />
+                                <span>—</span>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  max={actualDuration}
+                                  value={Number(cue.end.toFixed(1))}
+                                  onChange={(e) => updateCue(idx, { end: Math.max(0, Number(e.target.value)) })}
+                                  title="Detik selesai"
+                                />
+                                <button
+                                  type="button"
+                                  className="cue-seek-btn"
+                                  onClick={() => seekToCue(cue.start)}
+                                  title="Lompat ke detik ini"
+                                >
+                                  ▶
+                                </button>
+                              </div>
+                              <div className="cue-text-wrap">
+                                <textarea
+                                  rows={2}
+                                  value={cue.text}
+                                  onChange={(e) => updateCue(idx, { text: e.target.value })}
+                                  placeholder="Ketik kalimat subtitle..."
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                className="cue-delete-btn"
+                                onClick={() => deleteCue(idx)}
+                                title="Hapus baris ini"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab 2: Position & Free Placement */}
+                  {studioTab === 'position' && (
+                    <div className="position-style-pane">
+                      <div className="field-block">
+                        <label>Preset Tampilan Subtitle</label>
+                        <div className="style-presets-grid">
+                          <button
+                            type="button"
+                            className={`style-pill style-pill-yellow${subtitleStyle.preset === 'tiktok-yellow' ? ' is-active' : ''}`}
+                            onClick={() => updateSubtitleStyle({ preset: 'tiktok-yellow' })}
+                          >
+                            <span className="color-dot dot-yellow" />
+                            <strong>Viral Pop</strong>
+                            <small>Kuning + Outline</small>
+                          </button>
+                          <button
+                            type="button"
+                            className={`style-pill style-pill-capsule${subtitleStyle.preset === 'capsule-dark' ? ' is-active' : ''}`}
+                            onClick={() => updateSubtitleStyle({ preset: 'capsule-dark' })}
+                          >
+                            <span className="color-dot dot-capsule" />
+                            <strong>Matte Dark</strong>
+                            <small>Kotak Elegan</small>
+                          </button>
+                          <button
+                            type="button"
+                            className={`style-pill style-pill-cinema${subtitleStyle.preset === 'clean-cinema' ? ' is-active' : ''}`}
+                            onClick={() => updateSubtitleStyle({ preset: 'clean-cinema' })}
+                          >
+                            <span className="color-dot dot-white" />
+                            <strong>Cinematic</strong>
+                            <small>Putih + Shadow</small>
+                          </button>
+                          <button
+                            type="button"
+                            className={`style-pill style-pill-neon${subtitleStyle.preset === 'neon-cyan' ? ' is-active' : ''}`}
+                            onClick={() => updateSubtitleStyle({ preset: 'neon-cyan' })}
+                          >
+                            <span className="color-dot dot-cyan" />
+                            <strong>Cyber Neon</strong>
+                            <small>Cyan Glow</small>
+                          </button>
+                          <button
+                            type="button"
+                            className={`style-pill style-pill-red${subtitleStyle.preset === 'fire-red' ? ' is-active' : ''}`}
+                            onClick={() => updateSubtitleStyle({ preset: 'fire-red' })}
+                          >
+                            <span className="color-dot dot-red" />
+                            <strong>Bold Red</strong>
+                            <small>Kotak Merah</small>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="field-block">
+                        <div className="field-label-split">
+                          <label>Letak Subtitle Bebas (Posisi Y: Atas ↔ Bawah)</label>
+                          <strong>{Math.round((subtitleStyle.posY ?? 0.78) * 100)}%</strong>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="90"
+                          step="1"
+                          value={Math.round((subtitleStyle.posY ?? 0.78) * 100)}
+                          onChange={(e) => updateSubtitleStyle({ posY: Number(e.target.value) / 100 })}
+                          className="timeline"
+                        />
+                        <div className="range-hints">
+                          <span>10% (Atas)</span>
+                          <span>50% (Tengah)</span>
+                          <span>90% (Bawah)</span>
+                        </div>
+                      </div>
+
+                      <div className="field-block">
+                        <div className="field-label-split">
+                          <label>Posisi Horizontal (X: Kiri ↔ Kanan)</label>
+                          <strong>{Math.round((subtitleStyle.posX ?? 0.50) * 100)}%</strong>
+                        </div>
+                        <input
+                          type="range"
+                          min="15"
+                          max="85"
+                          step="1"
+                          value={Math.round((subtitleStyle.posX ?? 0.50) * 100)}
+                          onChange={(e) => updateSubtitleStyle({ posX: Number(e.target.value) / 100 })}
+                          className="timeline"
+                        />
+                        <div className="range-hints">
+                          <span>Kiri (15%)</span>
+                          <span>Tengah (50%)</span>
+                          <span>Kanan (85%)</span>
+                        </div>
+                      </div>
+
+                      <div className="field-row-split">
+                        <div className="field-block">
+                          <label>Ukuran Font</label>
+                          <div className="style-toggle-buttons">
+                            <button
+                              type="button"
+                              className={subtitleStyle.size === 'normal' ? 'is-active' : ''}
+                              onClick={() => updateSubtitleStyle({ size: 'normal' })}
+                            >
+                              Sedang
+                            </button>
+                            <button
+                              type="button"
+                              className={subtitleStyle.size === 'large' ? 'is-active' : ''}
+                              onClick={() => updateSubtitleStyle({ size: 'large' })}
+                            >
+                              Besar
+                            </button>
+                            <button
+                              type="button"
+                              className={subtitleStyle.size === 'huge' ? 'is-active' : ''}
+                              onClick={() => updateSubtitleStyle({ size: 'huge' })}
+                            >
+                              Ekstra
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="field-block">
+                          <label>Format Teks</label>
+                          <label className="checkbox-caps">
+                            <input
+                              type="checkbox"
+                              checked={subtitleStyle.uppercase}
+                              onChange={(e) => updateSubtitleStyle({ uppercase: e.target.checked })}
+                            />
+                            <span>KAPITAL (A-Z)</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tab 3: Watermark */}
+                  {studioTab === 'watermark' && (
+                    <div className="watermark-pane">
+                      <div className="watermark-toggle-row">
+                        <label className="toggle-switch-label">
+                          <input
+                            type="checkbox"
+                            checked={watermarkStyle.enabled}
+                            onChange={(e) => updateWatermarkStyle({ enabled: e.target.checked })}
+                          />
+                          <strong>Tampilkan Watermark / Nama Akun di Video</strong>
+                        </label>
+                      </div>
+
+                      <div className={`watermark-settings-form ${!watermarkStyle.enabled ? 'is-disabled' : ''}`}>
+                        <div className="field-block">
+                          <label htmlFor="wm-text">Teks Watermark</label>
+                          <input
+                            id="wm-text"
+                            type="text"
+                            value={watermarkStyle.text}
+                            onChange={(e) => updateWatermarkStyle({ text: e.target.value })}
+                            placeholder="Contoh: @khoirulanamid atau Channel Anda"
+                            disabled={!watermarkStyle.enabled}
+                          />
+                        </div>
+
+                        <div className="field-block">
+                          <label>Posisi Watermark</label>
+                          <div className="watermark-pos-grid">
+                            <button
+                              type="button"
+                              className={watermarkStyle.position === 'top-left' ? 'is-active' : ''}
+                              onClick={() => updateWatermarkStyle({ position: 'top-left' })}
+                              disabled={!watermarkStyle.enabled}
+                            >
+                              ↖ Kiri Atas
+                            </button>
+                            <button
+                              type="button"
+                              className={watermarkStyle.position === 'top-right' ? 'is-active' : ''}
+                              onClick={() => updateWatermarkStyle({ position: 'top-right' })}
+                              disabled={!watermarkStyle.enabled}
+                            >
+                              ↗ Kanan Atas
+                            </button>
+                            <button
+                              type="button"
+                              className={watermarkStyle.position === 'center' ? 'is-active' : ''}
+                              onClick={() => updateWatermarkStyle({ position: 'center' })}
+                              disabled={!watermarkStyle.enabled}
+                            >
+                              ● Tengah
+                            </button>
+                            <button
+                              type="button"
+                              className={watermarkStyle.position === 'bottom-left' ? 'is-active' : ''}
+                              onClick={() => updateWatermarkStyle({ position: 'bottom-left' })}
+                              disabled={!watermarkStyle.enabled}
+                            >
+                              ↙ Kiri Bawah
+                            </button>
+                            <button
+                              type="button"
+                              className={watermarkStyle.position === 'bottom-right' ? 'is-active' : ''}
+                              onClick={() => updateWatermarkStyle({ position: 'bottom-right' })}
+                              disabled={!watermarkStyle.enabled}
+                            >
+                              ↘ Kanan Bawah
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="field-row-split">
+                          <div className="field-block">
+                            <label>Ukuran Font</label>
+                            <div className="style-toggle-buttons">
+                              <button
+                                type="button"
+                                className={watermarkStyle.size === 'small' ? 'is-active' : ''}
+                                onClick={() => updateWatermarkStyle({ size: 'small' })}
+                                disabled={!watermarkStyle.enabled}
+                              >
+                                Kecil
+                              </button>
+                              <button
+                                type="button"
+                                className={watermarkStyle.size === 'medium' ? 'is-active' : ''}
+                                onClick={() => updateWatermarkStyle({ size: 'medium' })}
+                                disabled={!watermarkStyle.enabled}
+                              >
+                                Sedang
+                              </button>
+                              <button
+                                type="button"
+                                className={watermarkStyle.size === 'large' ? 'is-active' : ''}
+                                onClick={() => updateWatermarkStyle({ size: 'large' })}
+                                disabled={!watermarkStyle.enabled}
+                              >
+                                Besar
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="field-block">
+                            <div className="field-label-split">
+                              <label>Transparansi</label>
+                              <strong>{Math.round(watermarkStyle.opacity * 100)}%</strong>
+                            </div>
+                            <input
+                              type="range"
+                              min="20"
+                              max="100"
+                              step="5"
+                              value={Math.round(watermarkStyle.opacity * 100)}
+                              onChange={(e) => updateWatermarkStyle({ opacity: Number(e.target.value) / 100 })}
+                              disabled={!watermarkStyle.enabled}
+                              className="timeline"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {settingsOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
