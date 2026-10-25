@@ -111,6 +111,13 @@ const formatTime = (seconds: number) => {
   return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(centis).padStart(2, '0')}`;
 };
 
+const formatMinSec = (seconds: number) => {
+  const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const minutes = Math.floor(safe / 60);
+  const secs = Math.floor(safe % 60);
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+};
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const getSharpPortraitSize = (sourceWidth: number, sourceHeight: number) => {
@@ -737,17 +744,50 @@ export const App: React.FC = () => {
   };
 
   const updateStart = (value: number) => {
-    const maxStart = Math.max(0, duration - 0.1);
-    setStart(clamp(Number.isFinite(value) ? value : 0, 0, maxStart));
+    const maxStart = Math.max(0, duration - 0.5);
+    const newStart = clamp(Number.isFinite(value) ? value : 0, 0, maxStart);
+    setStart(newStart);
+    if (newStart + clipDuration > duration) {
+      setClipDuration(Math.max(0.5, duration - newStart));
+    }
     setExportState('idle');
     setSubtitleCues([]);
   };
 
-  const updateClipDuration = (value: number) => {
-    const available = Math.max(0.1, duration - start);
-    setClipDuration(clamp(Number.isFinite(value) ? value : 0.1, 0.1, available));
+  const updateEnd = (value: number) => {
+    const minEnd = Math.min(start + 0.5, duration);
+    const newEnd = clamp(Number.isFinite(value) ? value : minEnd, minEnd, duration);
+    setClipDuration(Math.max(0.5, newEnd - start));
     setExportState('idle');
     setSubtitleCues([]);
+  };
+
+  const updateStartMinutes = (mins: number) => {
+    const safeMins = Math.max(0, Number.isFinite(mins) ? mins : 0);
+    const currentSecs = start % 60;
+    updateStart(safeMins * 60 + currentSecs);
+  };
+
+  const updateStartSeconds = (secs: number) => {
+    const safeSecs = clamp(Number.isFinite(secs) ? secs : 0, 0, 59.9);
+    const currentMins = Math.floor(start / 60);
+    updateStart(currentMins * 60 + safeSecs);
+  };
+
+  const updateEndMinutes = (mins: number) => {
+    const safeMins = Math.max(0, Number.isFinite(mins) ? mins : 0);
+    const currentSecs = end % 60;
+    updateEnd(safeMins * 60 + currentSecs);
+  };
+
+  const updateEndSeconds = (secs: number) => {
+    const safeSecs = clamp(Number.isFinite(secs) ? secs : 0, 0, 59.9);
+    const currentMins = Math.floor(end / 60);
+    updateEnd(currentMins * 60 + safeSecs);
+  };
+
+  const setQuickDuration = (seconds: number) => {
+    updateEnd(start + seconds);
   };
 
   const recordSelectedAudio = async () => {
@@ -1281,24 +1321,126 @@ export const App: React.FC = () => {
               </div>
 
               <div className="control-grid">
+                {/* 1. Mulai dari Menit : Detik */}
                 <div className="field-group">
-                  <label htmlFor="start-time">Mulai pada detik</label>
-                  <div className="number-field"><input id="start-time" type="number" min="0" max={Math.max(0, duration - 0.1)} step="0.1" value={Number(start.toFixed(1))} onChange={(e) => updateStart(Number(e.target.value))} /><span>detik</span></div>
-                  <input className="timeline" aria-label="Waktu mulai klip" type="range" min="0" max={Math.max(0.1, duration - 0.1)} step="0.1" value={start} onChange={(e) => updateStart(Number(e.target.value))} />
+                  <div className="field-label-split">
+                    <label htmlFor="start-min">Mulai dari (Menit & Detik)</label>
+                    <span className="time-badge">{formatMinSec(start)}</span>
+                  </div>
+                  <div className="time-picker-row">
+                    <div className="time-unit-box">
+                      <input
+                        id="start-min"
+                        type="number"
+                        min="0"
+                        max={Math.floor(duration / 60)}
+                        value={Math.floor(start / 60)}
+                        onChange={(e) => updateStartMinutes(Number(e.target.value))}
+                        aria-label="Menit mulai"
+                      />
+                      <span>menit</span>
+                    </div>
+                    <span className="time-sep">:</span>
+                    <div className="time-unit-box">
+                      <input
+                        id="start-sec"
+                        type="number"
+                        min="0"
+                        max="59.9"
+                        step="0.5"
+                        value={Number((start % 60).toFixed(1))}
+                        onChange={(e) => updateStartSeconds(Number(e.target.value))}
+                        aria-label="Detik mulai"
+                      />
+                      <span>detik</span>
+                    </div>
+                  </div>
+                  <input
+                    className="timeline"
+                    aria-label="Slider waktu mulai klip"
+                    type="range"
+                    min="0"
+                    max={Math.max(0.1, duration - 0.5)}
+                    step="0.5"
+                    value={start}
+                    onChange={(e) => updateStart(Number(e.target.value))}
+                  />
+                  <div className="timeline-hints">
+                    <span>Awal 00:00</span>
+                    <span>Posisi: {formatMinSec(start)}</span>
+                  </div>
                 </div>
 
+                {/* 2. Sampai ke Menit : Detik */}
                 <div className="field-group">
-                  <label htmlFor="clip-duration">Panjang video</label>
-                  <div className="number-field"><input id="clip-duration" type="number" min="0.1" max={Math.max(0.1, duration - start)} step="0.1" value={Number(clipDuration.toFixed(1))} onChange={(e) => updateClipDuration(Number(e.target.value))} /><span>detik</span></div>
+                  <div className="field-label-split">
+                    <label htmlFor="end-min">Sampai ke (Menit & Detik)</label>
+                    <span className="time-badge">{formatMinSec(end)}</span>
+                  </div>
+                  <div className="time-picker-row">
+                    <div className="time-unit-box">
+                      <input
+                        id="end-min"
+                        type="number"
+                        min="0"
+                        max={Math.floor(duration / 60)}
+                        value={Math.floor(end / 60)}
+                        onChange={(e) => updateEndMinutes(Number(e.target.value))}
+                        aria-label="Menit selesai"
+                      />
+                      <span>menit</span>
+                    </div>
+                    <span className="time-sep">:</span>
+                    <div className="time-unit-box">
+                      <input
+                        id="end-sec"
+                        type="number"
+                        min="0"
+                        max="59.9"
+                        step="0.5"
+                        value={Number((end % 60).toFixed(1))}
+                        onChange={(e) => updateEndSeconds(Number(e.target.value))}
+                        aria-label="Detik selesai"
+                      />
+                      <span>detik</span>
+                    </div>
+                  </div>
+                  <input
+                    className="timeline"
+                    aria-label="Slider waktu selesai klip"
+                    type="range"
+                    min={Math.min(start + 0.5, duration)}
+                    max={Math.max(start + 0.5, duration)}
+                    step="0.5"
+                    value={end}
+                    onChange={(e) => updateEnd(Number(e.target.value))}
+                  />
+                  <div className="timeline-hints">
+                    <span>Selesai: {formatMinSec(end)}</span>
+                    <span>Akhir {formatMinSec(duration)}</span>
+                  </div>
                   <div className="presets" aria-label="Pilihan cepat durasi">
-                    {[15, 30, 60].map((value) => <button key={value} type="button" disabled={value > duration - start} className={Math.abs(clipDuration - value) < 0.05 ? 'is-active' : ''} onClick={() => updateClipDuration(value)}>{value} detik</button>)}
+                    {[15, 30, 60, 90].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        disabled={start + val > duration}
+                        className={Math.abs(actualDuration - val) < 0.6 ? 'is-active' : ''}
+                        onClick={() => setQuickDuration(val)}
+                      >
+                        +{val} dtk
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
 
               <div className="clip-summary">
-                <span><small>Potongan</small><strong>{formatTime(start)} — {formatTime(end)}</strong></span>
-                <span className="duration-badge">{actualDuration.toFixed(1)} detik</span>
+                <span>
+                  <small>Rentang Potongan Video</small>
+                  <strong>{formatMinSec(start)} — {formatMinSec(end)} ({formatTime(start)} — {formatTime(end)})</strong>
+                </span>
+                <span className="duration-badge">Durasi: {actualDuration.toFixed(1)} detik</span>
               </div>
 
               {/* Studio Editor Banner Card */}

@@ -50,13 +50,21 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .field-group { padding: 18px; border: 1px solid var(--line); border-radius: 10px; }
 .field-group label { display: block; margin-bottom: 9px; font-size: 13px; font-weight: 700; }
+.time-badge { font-size: 13px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.time-picker-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.time-unit-box { flex: 1; height: 46px; display: flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; overflow: hidden; transition: border-color .15s ease; }
+.time-unit-box:focus-within { border-color: var(--focus); }
+.time-unit-box input { min-width: 0; width: 100%; height: 100%; padding: 0 10px; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.time-unit-box span { padding: 0 10px 0 4px; color: var(--ink-secondary); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.time-sep { font-size: 18px; font-weight: 800; color: var(--ink-secondary); user-select: none; }
+.timeline-hints { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-secondary); margin-top: 5px; font-variant-numeric: tabular-nums; }
 .number-field { height: 48px; display: flex; align-items: center; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; }
 .number-field:focus-within { border-color: var(--focus); }
 .number-field input { min-width: 0; width: 100%; height: 100%; padding: 0 14px; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .number-field span { padding: 0 14px; color: var(--ink-secondary); font-size: 12px; }
 .timeline { width: 100%; margin: 15px 0 0; accent-color: var(--accent); cursor: pointer; }
-.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 11px; }
-.presets button { min-height: 38px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-secondary); background: var(--surface-muted); font-size: 11px; font-weight: 650; }
+.presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+.presets button { min-height: 36px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-secondary); background: var(--surface-muted); font-size: 11px; font-weight: 650; }
 .presets button:hover:not(:disabled), .presets button.is-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .clip-summary { min-height: 68px; margin-top: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; border-radius: 9px; background: var(--surface-muted); }
 .clip-summary > span { display: flex; flex-direction: column; gap: 4px; }
