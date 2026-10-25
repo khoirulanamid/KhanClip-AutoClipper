@@ -221,6 +221,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .connection-message.is-success { color: var(--success); background: var(--accent-soft); }
 .connection-message.is-error { color: var(--danger); background: #f9ecea; }
 .settings-check-hint { grid-column: 1 / -1; margin: 0; color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
+.stt-presets-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 8px; margin-top: 2px; }
+.stt-preset-btn { padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--ink); font-size: 11px; font-weight: 700; cursor: pointer; transition: all .15s ease; text-align: center; }
+.stt-preset-btn:hover { border-color: var(--accent); color: var(--accent); }
+.stt-preset-btn.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .settings-actions { grid-column: 1 / -1; padding-top: 4px; display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; }
 @media (max-width: 860px) {
   .studio-body { grid-template-columns: 1fr; overflow-y: auto; }

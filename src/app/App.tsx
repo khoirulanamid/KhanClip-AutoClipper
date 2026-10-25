@@ -636,15 +636,19 @@ export const App: React.FC = () => {
 
   const saveSttSettings = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!settingsVerified) {
-      setConnectionState('error');
-      setConnectionMessage('Cek pengaturan terlebih dahulu sebelum menyimpan.');
-      return;
+    let normalizedBaseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
+    if (sttSettings.apiFormat === 'openai') {
+      if (normalizedBaseUrl === 'https://api.openai.com') normalizedBaseUrl = 'https://api.openai.com/v1';
+      if (normalizedBaseUrl === 'https://api.groq.com' || normalizedBaseUrl === 'https://api.groq.com/openai') {
+        normalizedBaseUrl = 'https://api.groq.com/openai/v1';
+      }
     }
-    const { apiKey, ...safeSettings } = sttSettings;
+    const finalSettings = { ...sttSettings, baseUrl: normalizedBaseUrl };
+    const { apiKey, ...safeSettings } = finalSettings;
     localStorage.setItem('khanclip-stt-settings', JSON.stringify(safeSettings));
     if (apiKey) sessionStorage.setItem('khanclip-stt-api-key', apiKey);
     else sessionStorage.removeItem('khanclip-stt-api-key');
+    setSttSettings(finalSettings);
     setSubtitleCues([]);
     setSubtitleStatus('');
     setSettingsOpen(false);
@@ -671,8 +675,14 @@ export const App: React.FC = () => {
 
     setConnectionMessage('Menghubungkan ke API…');
     try {
-      const baseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
+      let baseUrl = sttSettings.baseUrl.trim().replace(/\/+$/, '');
       if (!/^https?:\/\//i.test(baseUrl)) throw new Error('Endpoint harus dimulai dengan http:// atau https://.');
+      if (sttSettings.apiFormat === 'openai') {
+        if (baseUrl === 'https://api.openai.com') baseUrl = 'https://api.openai.com/v1';
+        if (baseUrl === 'https://api.groq.com' || baseUrl === 'https://api.groq.com/openai') {
+          baseUrl = 'https://api.groq.com/openai/v1';
+        }
+      }
       if (!sttSettings.provider.trim()) throw new Error('Nama provider belum diisi.');
       if (!sttSettings.model.trim()) throw new Error('Model ID belum diisi.');
       const isGemini = sttSettings.apiFormat === 'gemini';
@@ -695,7 +705,7 @@ export const App: React.FC = () => {
       setVerifiedSettingsKey('');
       setConnectionState('error');
       const detail = caught instanceof Error ? caught.message : 'Koneksi gagal.';
-      setConnectionMessage(`${detail} Pastikan endpoint benar dan provider mengizinkan akses browser (CORS).`);
+      setConnectionMessage(`${detail} Pastikan provider mendukung model transkripsi suara (STT) dan mengizinkan akses browser (CORS).`);
     }
   };
 
@@ -1920,7 +1930,81 @@ export const App: React.FC = () => {
 
             <form className="settings-form" onSubmit={saveSttSettings}>
               <div className="settings-field settings-field-wide">
-                <label htmlFor="stt-format">Mesin AI / Format STT</label>
+                <label>Pilihan Cepat Provider AI STT</label>
+                <div className="stt-presets-bar">
+                  <button
+                    type="button"
+                    className={`stt-preset-btn${sttSettings.apiFormat === 'browser-whisper' ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setSttSettings({
+                        ...sttSettings,
+                        apiFormat: 'browser-whisper',
+                        provider: 'Whisper Web (Bebas API Key)',
+                        model: 'Xenova/whisper-tiny',
+                        baseUrl: '',
+                      });
+                      setConnectionState('success');
+                      setConnectionMessage('Whisper Web siap. 100% gratis & bebas API key.');
+                    }}
+                  >
+                    ⚡ Whisper Web (Gratis)
+                  </button>
+                  <button
+                    type="button"
+                    className={`stt-preset-btn${sttSettings.provider.toLowerCase().includes('groq') ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setSttSettings({
+                        ...sttSettings,
+                        apiFormat: 'openai',
+                        provider: 'Groq',
+                        baseUrl: 'https://api.groq.com/openai/v1',
+                        model: 'whisper-large-v3',
+                      });
+                      setConnectionState('idle');
+                      setConnectionMessage('');
+                    }}
+                  >
+                    ⚡ Groq Whisper
+                  </button>
+                  <button
+                    type="button"
+                    className={`stt-preset-btn${sttSettings.apiFormat === 'gemini' ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setSttSettings({
+                        ...sttSettings,
+                        apiFormat: 'gemini',
+                        provider: 'Gemini',
+                        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+                        model: 'gemini-1.5-flash',
+                      });
+                      setConnectionState('idle');
+                      setConnectionMessage('');
+                    }}
+                  >
+                    ⚡ Google Gemini
+                  </button>
+                  <button
+                    type="button"
+                    className={`stt-preset-btn${sttSettings.provider.toLowerCase() === 'openai' ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setSttSettings({
+                        ...sttSettings,
+                        apiFormat: 'openai',
+                        provider: 'OpenAI',
+                        baseUrl: 'https://api.openai.com/v1',
+                        model: 'whisper-1',
+                      });
+                      setConnectionState('idle');
+                      setConnectionMessage('');
+                    }}
+                  >
+                    ⚡ OpenAI Whisper
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-field settings-field-wide">
+                <label htmlFor="stt-format">Format Mesin AI</label>
                 <select id="stt-format" value={sttSettings.apiFormat} onChange={(event) => {
                   const nextFormat = event.target.value as SttSettings['apiFormat'];
                   if (nextFormat === 'browser-whisper') {
@@ -2011,8 +2095,8 @@ export const App: React.FC = () => {
               {connectionState === 'idle' && sttSettings.apiFormat !== 'browser-whisper' && <p className="settings-check-hint">Cek pengaturan terlebih dahulu. Tombol simpan akan aktif jika koneksi berhasil.</p>}
 
               <footer className="settings-actions">
-                <button className="button button-secondary" type="button" onClick={testSttConnection} disabled={connectionState === 'testing'}>{connectionState === 'testing' ? 'Memeriksa…' : settingsVerified ? 'Cek ulang' : 'Cek pengaturan'}</button>
-                <button className="button button-primary" type="submit" disabled={!settingsVerified}>Simpan pengaturan</button>
+                <button className="button button-secondary" type="button" onClick={testSttConnection} disabled={connectionState === 'testing'}>{connectionState === 'testing' ? 'Memeriksa…' : settingsVerified ? 'Cek ulang' : 'Cek koneksi'}</button>
+                <button className="button button-primary" type="submit">Simpan pengaturan</button>
               </footer>
             </form>
           </section>
