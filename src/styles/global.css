@@ -82,6 +82,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .error-message, .success-message { margin: 16px 0 0; padding: 11px 13px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
 .error-message { color: var(--danger); background: #f9ecea; }
 .success-message { color: var(--success); background: var(--accent-soft); }
+.export-done-card { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.export-done-card .success-message { margin: 0; }
+.download-now-btn { text-decoration: none; width: 100%; justify-content: center; }
 .subtitle-status { margin: 14px 0 0; color: var(--ink-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
 
 /* Subtitle Style Picker */

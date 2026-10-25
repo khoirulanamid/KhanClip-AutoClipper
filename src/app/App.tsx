@@ -445,6 +445,8 @@ export const App: React.FC = () => {
   const [clipDuration, setClipDuration] = useState(30);
   const [dragging, setDragging] = useState(false);
   const [exportState, setExportState] = useState<ExportState>('idle');
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [downloadFileName, setDownloadFileName] = useState('');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [exportLabel, setExportLabel] = useState('Menyiapkan video…');
@@ -1090,6 +1092,7 @@ export const App: React.FC = () => {
     renderVideo.preload = 'auto';
     renderVideo.playsInline = true;
     renderVideo.crossOrigin = 'anonymous';
+    renderVideo.muted = true;
 
     let faceLandmarker: FaceLandmarker | null = null;
     try {
@@ -1141,23 +1144,73 @@ export const App: React.FC = () => {
       });
 
       recorder.start(500);
-      await renderVideo.play();
+      setExportLabel('Merekam dan merender klip 9:16… (0%)');
+      try {
+        await renderVideo.play();
+      } catch (err: any) {
+        if (err?.name !== 'AbortError' && !err?.message?.includes('interrupted')) {
+          throw err;
+        }
+      }
       const startedAt = performance.now();
       let frameIndex = 0;
       let focusX = 0.5;
       let focusY = 0.44;
 
       await new Promise<void>((resolve) => {
-        const draw = () => {
-          if (cancelExportRef.current || renderVideo.currentTime >= end || renderVideo.ended) {
-            renderVideo.pause();
-            resolve();
+        let isDone = false;
+        let lastLoggedTime = -1;
+        let stallCount = 0;
+
+        const finish = () => {
+          if (isDone) return;
+          isDone = true;
+          clearInterval(watchdog);
+          renderVideo.removeEventListener('timeupdate', checkFinish);
+          renderVideo.removeEventListener('ended', finish);
+          renderVideo.pause();
+          resolve();
+        };
+
+        const checkFinish = () => {
+          if (cancelExportRef.current) {
+            finish();
             return;
           }
+          const elapsed = (performance.now() - startedAt) / 1000;
+          if (renderVideo.currentTime >= end - 0.15 || renderVideo.ended || elapsed >= actualDuration + 0.8) {
+            finish();
+          }
+        };
+
+        renderVideo.addEventListener('timeupdate', checkFinish);
+        renderVideo.addEventListener('ended', finish);
+
+        const watchdog = setInterval(() => {
+          checkFinish();
+          if (renderVideo.currentTime === lastLoggedTime && (performance.now() - startedAt) / 1000 > 1.5) {
+            stallCount++;
+            if (stallCount >= 8 && renderVideo.currentTime >= start + 0.5) {
+              finish();
+            }
+          } else {
+            stallCount = 0;
+            lastLoggedTime = renderVideo.currentTime;
+          }
+        }, 250);
+
+        const draw = () => {
+          if (isDone) return;
+          const elapsed = (performance.now() - startedAt) / 1000;
+          if (cancelExportRef.current || renderVideo.currentTime >= end - 0.15 || renderVideo.ended || elapsed >= actualDuration + 0.8) {
+            finish();
+            return;
+          }
+
           if (frameIndex % 5 === 0 && faceLandmarker) {
             const result = faceLandmarker.detectForVideo(renderVideo, frameIndex * (1000 / 30));
             let bestScore = -1;
-            result.faceLandmarks.forEach((landmarks, faceIndex) => {
+            result.faceLandmarks.forEach((landmarks, fIdx) => {
               if (!landmarks.length) return;
               const xs = landmarks.map((point) => point.x);
               const ys = landmarks.map((point) => point.y);
@@ -1166,7 +1219,7 @@ export const App: React.FC = () => {
               const minY = Math.min(...ys);
               const maxY = Math.max(...ys);
               const faceArea = Math.max(0, (maxX - minX) * (maxY - minY));
-              const jawOpen = result.faceBlendshapes[faceIndex]?.categories.find(
+              const jawOpen = result.faceBlendshapes[fIdx]?.categories.find(
                 (category) => category.categoryName === 'jawOpen'
               )?.score ?? 0;
               const score = jawOpen * 2.4 + faceArea;
@@ -1193,14 +1246,27 @@ export const App: React.FC = () => {
           drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end), subtitleStyle);
           drawWatermark(context, canvas, watermarkStyle);
           frameIndex += 1;
-          setProgress(clamp(((performance.now() - startedAt) / 1000 / actualDuration) * 100, 0, 99));
+
+          const progressPercent = Math.min(99, Math.max(1, Math.round(((renderVideo.currentTime - start) / actualDuration) * 100)));
+          setProgress(progressPercent);
+          setExportLabel(`Memproses klip 9:16: ${progressPercent}%…`);
           requestAnimationFrame(draw);
         };
         draw();
       });
 
-      recorder.stop();
-      const blob = await finished;
+      setExportLabel('Mengemas & menyiapkan unduhan… (99%)');
+      setProgress(99);
+
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
+      }
+
+      const blob = await Promise.race([
+        finished,
+        new Promise<Blob>((_, reject) => setTimeout(() => reject(new Error('Perekam video melebihi batas waktu (timeout).')), 8000))
+      ]);
+
       canvasStream.getTracks().forEach((track) => track.stop());
       if (cancelExportRef.current) {
         setExportState('idle');
@@ -1210,13 +1276,18 @@ export const App: React.FC = () => {
 
       const extension = blob.type.includes('mp4') ? 'mp4' : 'webm';
       const outputUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
       const baseName = file.name.replace(/\.[^.]+$/, '') || 'video';
+      const finalFileName = `${baseName}_clip_${Math.floor(start)}-${Math.floor(end)}.${extension}`;
+      setDownloadUrl(outputUrl);
+      setDownloadFileName(finalFileName);
+
+      const link = document.createElement('a');
       link.href = outputUrl;
-      link.download = `${baseName}_clip_${Math.floor(start)}-${Math.floor(end)}.${extension}`;
+      link.download = finalFileName;
       link.click();
-      setTimeout(() => URL.revokeObjectURL(outputUrl), 1000);
+
       setProgress(100);
+      setExportLabel('Selesai!');
       setExportState('done');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Klip gagal diekspor. Coba gunakan video MP4 di Chrome atau Edge terbaru.');
@@ -1469,7 +1540,20 @@ export const App: React.FC = () => {
               {error && <p className="error-message" role="alert">{error}</p>}
               {subtitleStatus && <p className="subtitle-status" role="status">{subtitleStatus}</p>}
               {exportState === 'exporting' && <div className="progress-wrap" aria-live="polite"><div className="progress-meta"><span>{exportLabel}</span><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><span style={{ transform: `scaleX(${progress / 100})` }} /></div></div>}
-              {exportState === 'done' && <p className="success-message" role="status">Klip selesai dan sudah diunduh.</p>}
+              {exportState === 'done' && (
+                <div className="export-done-card">
+                  <p className="success-message" role="status">🎉 Klip 9:16 selesai diproses dan diunduh!</p>
+                  {downloadUrl && (
+                    <a
+                      href={downloadUrl}
+                      download={downloadFileName || 'clip_tiktok.mp4'}
+                      className="button button-primary download-now-btn"
+                    >
+                      <ScissorsIcon /> Unduh Ulang ({downloadFileName || 'Klip 9:16'})
+                    </a>
+                  )}
+                </div>
+              )}
 
               <div className="actions">
                 {previewState === 'playing' ? (
