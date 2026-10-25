@@ -315,8 +315,7 @@ export const App: React.FC = () => {
 
     const COBALT_INSTANCES = [
       'https://rue-cobalt.xenon.zone',
-      'https://cobaltapi.cjs.nz',
-      'https://cobalt.canine.tools'
+      'https://cobaltapi.cjs.nz'
     ];
 
     let lastError = '';
@@ -342,7 +341,7 @@ export const App: React.FC = () => {
 
           if (resp.ok) {
             const parsed = await resp.json();
-            if (parsed.status === 'tunnel' || parsed.status === 'stream' || parsed.status === 'redirect') {
+            if (parsed.status === 'tunnel' || parsed.status === 'stream') {
               data = parsed;
               break;
             }
@@ -351,20 +350,45 @@ export const App: React.FC = () => {
 
         if (!data || !data.url) continue;
 
-        setYtStatus(`Mengunduh stream video (${data.filename || 'HD'})…`);
-        const streamResp = await fetch(data.url);
-        if (!streamResp.ok) continue;
+        setYtStatus('Menghubungkan stream video ke editor…');
+        await new Promise<void>((resolve, reject) => {
+          const testVid = document.createElement('video');
+          testVid.crossOrigin = 'anonymous';
+          testVid.src = data.url;
+          const timer = setTimeout(() => {
+            testVid.src = '';
+            reject(new Error('Waktu muat stream habis.'));
+          }, 10000);
+          testVid.onloadedmetadata = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          testVid.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error('Stream video tidak dapat dimuat.'));
+          };
+          testVid.load();
+        });
 
-        const blob = await streamResp.blob();
-        if (blob && blob.size > 0) {
-          const filename = data.filename || 'youtube_video.mp4';
-          const videoFile = new File([blob], filename, { type: blob.type || 'video/mp4' });
-          loadFile(videoFile);
-          setYtUrl('');
-          setYtLoading(false);
-          setYtStatus('');
-          return;
-        }
+        const filename = data.filename || 'youtube_video.mp4';
+        const virtualFile = new File([], filename, { type: 'video/mp4' });
+
+        if (sourceUrl && sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl);
+        setFile(virtualFile);
+        setSourceUrl(data.url);
+        setDuration(0);
+        setStart(0);
+        setClipDuration(30);
+        setProgress(0);
+        setExportState('idle');
+        setPreviewState('idle');
+        setError('');
+        setSubtitleCues([]);
+        setSubtitleStatus('');
+        setYtUrl('');
+        setYtLoading(false);
+        setYtStatus('');
+        return;
       } catch (err: any) {
         lastError = err?.message || 'Gagal memproses stream';
       }
@@ -391,6 +415,7 @@ export const App: React.FC = () => {
 
   const recordSelectedAudio = async () => {
     const audioVideo = document.createElement('video');
+    audioVideo.crossOrigin = 'anonymous';
     audioVideo.src = sourceUrl;
     audioVideo.preload = 'auto';
     audioVideo.muted = true;
@@ -808,7 +833,7 @@ export const App: React.FC = () => {
             <div className="preview-panel">
               <div className="preview-grid">
                 <div><span className="preview-label">VIDEO ASLI</span><div className="video-frame">
-                <video ref={videoRef} src={sourceUrl} controls playsInline onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(event) => {
+                <video ref={videoRef} src={sourceUrl} crossOrigin="anonymous" controls playsInline onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(event) => {
                   const nextDuration = event.currentTarget.duration;
                   setDuration(nextDuration);
                   setClipDuration(Math.min(30, nextDuration));
