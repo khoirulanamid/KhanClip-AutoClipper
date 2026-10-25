@@ -364,6 +364,12 @@ const TagIcon = () => (
   </svg>
 );
 
+const SparklesIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 3l1.912 5.885L19.797 10.8 13.912 12.715 12 18.6 10.088 12.715 4.203 10.8l5.885-1.915L12 3zM19 17l.956 2.943L22.899 20.9 19.956 21.857 19 24.8l-.956-2.943L15.101 20.9l2.943-.957L19 17z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const FilmIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M17 9h4M3 15h4M17 15h4"/></svg>
 );
@@ -1295,127 +1301,27 @@ export const App: React.FC = () => {
                 <span className="duration-badge">{actualDuration.toFixed(1)} detik</span>
               </div>
 
-              {/* Pilihan Gaya Subtitle */}
-              <div className="subtitle-style-card">
-                <div className="subtitle-style-head">
-                  <span className="style-title"><ChatIcon /> Gaya Teks Subtitle</span>
-                  <label className="checkbox-caps">
-                    <input
-                      type="checkbox"
-                      checked={subtitleStyle.uppercase}
-                      onChange={(e) => updateSubtitleStyle({ uppercase: e.target.checked })}
-                    />
-                    <span>KAPITAL (A-Z)</span>
-                  </label>
-                </div>
-
-                <div className="style-presets-grid" role="radiogroup" aria-label="Pilihan gaya subtitle">
-                  <button
-                    type="button"
-                    className={`style-pill style-pill-yellow${subtitleStyle.preset === 'tiktok-yellow' ? ' is-active' : ''}`}
-                    onClick={() => updateSubtitleStyle({ preset: 'tiktok-yellow' })}
-                  >
-                    <span className="color-dot dot-yellow" />
-                    <strong>Viral Pop</strong>
-                    <small>Kuning + Outline</small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`style-pill style-pill-capsule${subtitleStyle.preset === 'capsule-dark' ? ' is-active' : ''}`}
-                    onClick={() => updateSubtitleStyle({ preset: 'capsule-dark' })}
-                  >
-                    <span className="color-dot dot-capsule" />
-                    <strong>Matte Dark</strong>
-                    <small>Kotak Elegan</small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`style-pill style-pill-cinema${subtitleStyle.preset === 'clean-cinema' ? ' is-active' : ''}`}
-                    onClick={() => updateSubtitleStyle({ preset: 'clean-cinema' })}
-                  >
-                    <span className="color-dot dot-white" />
-                    <strong>Cinematic</strong>
-                    <small>Putih + Shadow</small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`style-pill style-pill-neon${subtitleStyle.preset === 'neon-cyan' ? ' is-active' : ''}`}
-                    onClick={() => updateSubtitleStyle({ preset: 'neon-cyan' })}
-                  >
-                    <span className="color-dot dot-cyan" />
-                    <strong>Cyber Neon</strong>
-                    <small>Cyan Glow</small>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`style-pill style-pill-red${subtitleStyle.preset === 'fire-red' ? ' is-active' : ''}`}
-                    onClick={() => updateSubtitleStyle({ preset: 'fire-red' })}
-                  >
-                    <span className="color-dot dot-red" />
-                    <strong>Bold Red</strong>
-                    <small>Kotak Merah</small>
-                  </button>
-                </div>
-
-                <div className="subtitle-custom-options">
-                  <div className="style-option-group">
-                    <label>Posisi Teks:</label>
-                    <div className="style-toggle-buttons">
-                      <button
-                        type="button"
-                        className={subtitleStyle.position === 'bottom' ? 'is-active' : ''}
-                        onClick={() => updateSubtitleStyle({ position: 'bottom' })}
-                      >
-                        Bawah
-                      </button>
-                      <button
-                        type="button"
-                        className={subtitleStyle.position === 'center' ? 'is-active' : ''}
-                        onClick={() => updateSubtitleStyle({ position: 'center' })}
-                      >
-                        Tengah
-                      </button>
-                      <button
-                        type="button"
-                        className={subtitleStyle.position === 'top' ? 'is-active' : ''}
-                        onClick={() => updateSubtitleStyle({ position: 'top' })}
-                      >
-                        Atas
-                      </button>
-                    </div>
+              {/* Studio Editor Banner Card */}
+              <div
+                className="studio-banner-card"
+                onClick={() => { setStudioOpen(true); setTimeout(() => redrawCurrentPreviewFrame(), 50); }}
+                title="Buka Studio Editor untuk mengedit subtitle, gaya tampilan, letak bebas, dan watermark"
+              >
+                <div className="studio-banner-copy">
+                  <div className="studio-banner-badge">
+                    <SparklesIcon />
+                    <span>STUDIO EDITOR 9:16</span>
                   </div>
-
-                  <div className="style-option-group">
-                    <label>Ukuran Font:</label>
-                    <div className="style-toggle-buttons">
-                      <button
-                        type="button"
-                        className={subtitleStyle.size === 'normal' ? 'is-active' : ''}
-                        onClick={() => updateSubtitleStyle({ size: 'normal' })}
-                      >
-                        Sedang
-                      </button>
-                      <button
-                        type="button"
-                        className={subtitleStyle.size === 'large' ? 'is-active' : ''}
-                        onClick={() => updateSubtitleStyle({ size: 'large' })}
-                      >
-                        Besar
-                      </button>
-                      <button
-                        type="button"
-                        className={subtitleStyle.size === 'huge' ? 'is-active' : ''}
-                        onClick={() => updateSubtitleStyle({ size: 'huge' })}
-                      >
-                        Ekstra
-                      </button>
-                    </div>
-                  </div>
+                  <strong>Sesuaikan Subtitle & Watermark</strong>
+                  <p>Gaya font viral, edit kata-kata, letak subtitle bebas, & watermark nama akun.</p>
                 </div>
+                <button
+                  type="button"
+                  className="button button-primary button-sm studio-banner-btn"
+                  onClick={(e) => { e.stopPropagation(); setStudioOpen(true); setTimeout(() => redrawCurrentPreviewFrame(), 50); }}
+                >
+                  <ExpandIcon /> Buka Studio
+                </button>
               </div>
 
               {error && <p className="error-message" role="alert">{error}</p>}
@@ -1700,6 +1606,33 @@ export const App: React.FC = () => {
                             <span className="color-dot dot-red" />
                             <strong>Bold Red</strong>
                             <small>Kotak Merah</small>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="field-block">
+                        <label>Posisi Cepat (Jangkar Layar)</label>
+                        <div className="style-toggle-buttons style-toggle-full">
+                          <button
+                            type="button"
+                            className={subtitleStyle.position === 'bottom' && Math.abs((subtitleStyle.posY ?? 0.78) - 0.78) < 0.04 ? 'is-active' : ''}
+                            onClick={() => updateSubtitleStyle({ position: 'bottom', posY: 0.78, posX: 0.50 })}
+                          >
+                            ⬇ Bawah (Default)
+                          </button>
+                          <button
+                            type="button"
+                            className={subtitleStyle.position === 'center' && Math.abs((subtitleStyle.posY ?? 0.52) - 0.52) < 0.04 ? 'is-active' : ''}
+                            onClick={() => updateSubtitleStyle({ position: 'center', posY: 0.52, posX: 0.50 })}
+                          >
+                            ⏺ Tengah
+                          </button>
+                          <button
+                            type="button"
+                            className={subtitleStyle.position === 'top' && Math.abs((subtitleStyle.posY ?? 0.28) - 0.28) < 0.04 ? 'is-active' : ''}
+                            onClick={() => updateSubtitleStyle({ position: 'top', posY: 0.28, posX: 0.50 })}
+                          >
+                            ⬆ Atas
                           </button>
                         </div>
                       </div>

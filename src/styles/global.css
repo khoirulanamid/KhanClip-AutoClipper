@@ -106,6 +106,18 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .style-toggle-buttons button:not(:last-child) { border-right: 1px solid var(--line); }
 .style-toggle-buttons button:hover { color: var(--ink); background: var(--surface-muted); }
 .style-toggle-buttons button.is-active { background: var(--accent); color: #fff; }
+.style-toggle-full { display: grid !important; grid-template-columns: repeat(3, 1fr); width: 100%; }
+.style-toggle-full button { text-align: center; }
+
+/* Studio Banner Callout on Step 2 */
+.studio-banner-card { margin-top: 16px; padding: 16px 18px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, #fff), #ffffff); display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; transition: all .18s ease; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03); }
+.studio-banner-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 15%, transparent); }
+.studio-banner-copy { display: flex; flex-direction: column; gap: 4px; }
+.studio-banner-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.studio-banner-badge svg { width: 13px; height: 13px; }
+.studio-banner-copy strong { font-size: 14px; color: var(--ink); letter-spacing: -.01em; }
+.studio-banner-copy p { margin: 0; font-size: 12px; color: var(--ink-secondary); line-height: 1.4; }
+.studio-banner-btn { flex-shrink: 0; white-space: nowrap; }
 
 .whisper-banner { padding: 14px 16px; border-radius: 8px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
 .whisper-banner-header { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; color: var(--accent); font-size: 13px; font-weight: 750; }
