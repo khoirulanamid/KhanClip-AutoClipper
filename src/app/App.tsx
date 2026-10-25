@@ -21,6 +21,24 @@ interface SubtitleCue {
   text: string;
 }
 
+export type SubtitlePreset = 'tiktok-yellow' | 'capsule-dark' | 'clean-cinema' | 'neon-cyan' | 'fire-red';
+export type SubtitlePosition = 'bottom' | 'center' | 'top';
+export type SubtitleSize = 'normal' | 'large' | 'huge';
+
+export interface SubtitleStyleSettings {
+  preset: SubtitlePreset;
+  position: SubtitlePosition;
+  size: SubtitleSize;
+  uppercase: boolean;
+}
+
+const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
+  preset: 'tiktok-yellow',
+  position: 'bottom',
+  size: 'normal',
+  uppercase: true,
+};
+
 const DEFAULT_STT_SETTINGS: SttSettings = {
   baseUrl: '',
   apiKey: '',
@@ -95,33 +113,138 @@ const blobToBase64 = (blob: Blob) => new Promise<string>((resolve, reject) => {
   reader.readAsDataURL(blob);
 });
 
-const drawSubtitle = (context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, cue?: SubtitleCue) => {
+const drawSubtitle = (
+  context: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  cue?: SubtitleCue,
+  styleSettings: SubtitleStyleSettings = DEFAULT_SUBTITLE_STYLE
+) => {
   if (!cue?.text.trim()) return;
-  const fontSize = Math.max(24, Math.round(canvas.width * 0.052));
-  const maxWidth = canvas.width * 0.84;
+
+  // Base font size scaling
+  let sizeMultiplier = 0.052;
+  if (styleSettings.size === 'large') sizeMultiplier = 0.064;
+  if (styleSettings.size === 'huge') sizeMultiplier = 0.076;
+  const fontSize = Math.max(22, Math.round(canvas.width * sizeMultiplier));
+  const maxWidth = canvas.width * 0.86;
+
+  let rawText = cue.text.trim();
+  if (styleSettings.uppercase) {
+    rawText = rawText.toUpperCase();
+  }
+
   context.save();
-  context.font = `700 ${fontSize}px Inter, sans-serif`;
+  const fontFam = styleSettings.preset === 'tiktok-yellow'
+    ? '"Plus Jakarta Sans", "Impact", "Inter", sans-serif'
+    : '"Plus Jakarta Sans", "Inter", sans-serif';
+  context.font = `800 ${fontSize}px ${fontFam}`;
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  const words = cue.text.trim().split(/\s+/);
+
+  const words = rawText.split(/\s+/);
   const lines: string[] = [];
   let line = '';
   words.forEach((word) => {
     const next = line ? `${line} ${word}` : word;
-    if (context.measureText(next).width > maxWidth && line) { lines.push(line); line = word; }
-    else line = next;
+    if (context.measureText(next).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
   });
   if (line) lines.push(line);
   const visibleLines = lines.slice(0, 3);
   const lineHeight = fontSize * 1.25;
-  const boxHeight = visibleLines.length * lineHeight + fontSize * 0.7;
-  const centerY = canvas.height * 0.79;
-  context.fillStyle = 'rgba(0, 0, 0, 0.72)';
-  context.beginPath();
-  context.roundRect(canvas.width * 0.06, centerY - boxHeight / 2, canvas.width * 0.88, boxHeight, fontSize * 0.28);
-  context.fill();
-  context.fillStyle = '#fff';
-  visibleLines.forEach((text, index) => context.fillText(text, canvas.width / 2, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight));
+  const totalTextHeight = visibleLines.length * lineHeight;
+
+  // Position
+  let centerY = canvas.height * 0.78;
+  if (styleSettings.position === 'center') centerY = canvas.height * 0.52;
+  if (styleSettings.position === 'top') centerY = canvas.height * 0.28;
+
+  // 1. Preset: Capsule Dark
+  if (styleSettings.preset === 'capsule-dark') {
+    const boxHeight = totalTextHeight + fontSize * 0.75;
+    const boxWidth = Math.min(canvas.width * 0.90, Math.max(...visibleLines.map((l) => context.measureText(l).width)) + fontSize * 1.4);
+    context.fillStyle = 'rgba(15, 17, 21, 0.78)';
+    context.beginPath();
+    context.roundRect(canvas.width / 2 - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight, fontSize * 0.35);
+    context.fill();
+
+    context.fillStyle = '#ffffff';
+    visibleLines.forEach((text, index) => {
+      context.fillText(text, canvas.width / 2, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight);
+    });
+  }
+
+  // 2. Preset: TikTok Yellow (Hormozi / Viral Pop)
+  else if (styleSettings.preset === 'tiktok-yellow') {
+    visibleLines.forEach((text, index) => {
+      const lineY = centerY + (index - (visibleLines.length - 1) / 2) * lineHeight;
+
+      // Heavy black stroke
+      context.strokeStyle = '#000000';
+      context.lineWidth = Math.max(5, fontSize * 0.18);
+      context.lineJoin = 'miter';
+      context.miterLimit = 2;
+      context.strokeText(text, canvas.width / 2, lineY);
+
+      // Bright yellow fill
+      context.fillStyle = '#FFE600';
+      context.fillText(text, canvas.width / 2, lineY);
+    });
+  }
+
+  // 3. Preset: Clean Cinema (Pure White with Deep Shadow)
+  else if (styleSettings.preset === 'clean-cinema') {
+    context.shadowColor = 'rgba(0, 0, 0, 0.85)';
+    context.shadowBlur = 12;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 4;
+
+    visibleLines.forEach((text, index) => {
+      const lineY = centerY + (index - (visibleLines.length - 1) / 2) * lineHeight;
+      context.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+      context.lineWidth = Math.max(3, fontSize * 0.08);
+      context.strokeText(text, canvas.width / 2, lineY);
+
+      context.fillStyle = '#FFFFFF';
+      context.fillText(text, canvas.width / 2, lineY);
+    });
+  }
+
+  // 4. Preset: Cyber Neon (Cyan Glowing Text)
+  else if (styleSettings.preset === 'neon-cyan') {
+    visibleLines.forEach((text, index) => {
+      const lineY = centerY + (index - (visibleLines.length - 1) / 2) * lineHeight;
+
+      context.strokeStyle = '#000000';
+      context.lineWidth = Math.max(4, fontSize * 0.16);
+      context.strokeText(text, canvas.width / 2, lineY);
+
+      context.fillStyle = '#00F0FF';
+      context.shadowColor = 'rgba(0, 240, 255, 0.7)';
+      context.shadowBlur = 15;
+      context.fillText(text, canvas.width / 2, lineY);
+    });
+  }
+
+  // 5. Preset: Fire Red (High Alert Box)
+  else if (styleSettings.preset === 'fire-red') {
+    const boxHeight = totalTextHeight + fontSize * 0.7;
+    const boxWidth = Math.min(canvas.width * 0.90, Math.max(...visibleLines.map((l) => context.measureText(l).width)) + fontSize * 1.3);
+    context.fillStyle = '#DC2626';
+    context.beginPath();
+    context.roundRect(canvas.width / 2 - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight, 8);
+    context.fill();
+
+    context.fillStyle = '#FFFFFF';
+    visibleLines.forEach((text, index) => {
+      context.fillText(text, canvas.width / 2, centerY + (index - (visibleLines.length - 1) / 2) * lineHeight);
+    });
+  }
+
   context.restore();
 };
 
@@ -204,6 +327,51 @@ export const App: React.FC = () => {
   const [verifiedSettingsKey, setVerifiedSettingsKey] = useState('');
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [subtitleStatus, setSubtitleStatus] = useState('');
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('khanclip-subtitle-style') || '{}');
+      return { ...DEFAULT_SUBTITLE_STYLE, ...saved };
+    } catch {
+      return DEFAULT_SUBTITLE_STYLE;
+    }
+  });
+
+  const redrawCurrentPreviewFrame = (style = subtitleStyle) => {
+    const video = videoRef.current;
+    const canvas = previewCanvasRef.current;
+    const context = canvas?.getContext('2d');
+    if (!video || !canvas || !context || video.readyState < 1) return;
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+
+    const focus = previewFocusRef.current;
+    const targetAspect = 9 / 16;
+    const sourceAspect = video.videoWidth / video.videoHeight;
+    let sourceWidth = video.videoWidth;
+    let sourceHeight = video.videoHeight;
+    if (sourceAspect > targetAspect) sourceWidth = sourceHeight * targetAspect;
+    else sourceHeight = sourceWidth / targetAspect;
+    const sourceX = clamp(focus.x * video.videoWidth - sourceWidth / 2, 0, video.videoWidth - sourceWidth);
+    const sourceY = clamp(focus.y * video.videoHeight - sourceHeight / 2, 0, video.videoHeight - sourceHeight);
+    context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+
+    const localTime = Math.max(0, video.currentTime - start);
+    const activeCue = subtitleCues.find((cue) => localTime >= cue.start && localTime < cue.end)
+      || (subtitleCues.length ? subtitleCues[0] : { start: 0, end: 10, text: 'Contoh Gaya Subtitle' });
+
+    drawSubtitle(context, canvas, activeCue, style);
+  };
+
+  const updateSubtitleStyle = (next: Partial<SubtitleStyleSettings>) => {
+    setSubtitleStyle((prev) => {
+      const updated = { ...prev, ...next };
+      localStorage.setItem('khanclip-subtitle-style', JSON.stringify(updated));
+      setTimeout(() => redrawCurrentPreviewFrame(updated), 10);
+      return updated;
+    });
+  };
+
   const [sttSettings, setSttSettings] = useState<SttSettings>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('khanclip-stt-settings') || '{}');
@@ -593,7 +761,7 @@ export const App: React.FC = () => {
         const sourceY = clamp(focus.y * video.videoHeight - sourceHeight / 2, 0, video.videoHeight - sourceHeight);
         context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
         const localTime = video.currentTime - start;
-        drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end));
+        drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end), subtitleStyle);
         focus.frame += 1;
         previewAnimationRef.current = requestAnimationFrame(drawPreview);
       };
@@ -732,7 +900,7 @@ export const App: React.FC = () => {
           const sourceY = clamp(focusY * renderVideo.videoHeight - sourceHeight / 2, 0, renderVideo.videoHeight - sourceHeight);
           context.drawImage(renderVideo, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
           const localTime = renderVideo.currentTime - start;
-          drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end));
+          drawSubtitle(context, canvas, activeCues.find((cue) => localTime >= cue.start && localTime < cue.end), subtitleStyle);
           frameIndex += 1;
           setProgress(clamp(((performance.now() - startedAt) / 1000 / actualDuration) * 100, 0, 99));
           requestAnimationFrame(draw);
@@ -854,6 +1022,129 @@ export const App: React.FC = () => {
               <div className="clip-summary">
                 <span><small>Potongan</small><strong>{formatTime(start)} — {formatTime(end)}</strong></span>
                 <span className="duration-badge">{actualDuration.toFixed(1)} detik</span>
+              </div>
+
+              {/* Pilihan Gaya Subtitle */}
+              <div className="subtitle-style-card">
+                <div className="subtitle-style-head">
+                  <span className="style-title"><ChatIcon /> Gaya Teks Subtitle</span>
+                  <label className="checkbox-caps">
+                    <input
+                      type="checkbox"
+                      checked={subtitleStyle.uppercase}
+                      onChange={(e) => updateSubtitleStyle({ uppercase: e.target.checked })}
+                    />
+                    <span>KAPITAL (A-Z)</span>
+                  </label>
+                </div>
+
+                <div className="style-presets-grid" role="radiogroup" aria-label="Pilihan gaya subtitle">
+                  <button
+                    type="button"
+                    className={`style-pill style-pill-yellow${subtitleStyle.preset === 'tiktok-yellow' ? ' is-active' : ''}`}
+                    onClick={() => updateSubtitleStyle({ preset: 'tiktok-yellow' })}
+                  >
+                    <span className="color-dot dot-yellow" />
+                    <strong>Viral Pop</strong>
+                    <small>Kuning + Outline</small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`style-pill style-pill-capsule${subtitleStyle.preset === 'capsule-dark' ? ' is-active' : ''}`}
+                    onClick={() => updateSubtitleStyle({ preset: 'capsule-dark' })}
+                  >
+                    <span className="color-dot dot-capsule" />
+                    <strong>Matte Dark</strong>
+                    <small>Kotak Elegan</small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`style-pill style-pill-cinema${subtitleStyle.preset === 'clean-cinema' ? ' is-active' : ''}`}
+                    onClick={() => updateSubtitleStyle({ preset: 'clean-cinema' })}
+                  >
+                    <span className="color-dot dot-white" />
+                    <strong>Cinematic</strong>
+                    <small>Putih + Shadow</small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`style-pill style-pill-neon${subtitleStyle.preset === 'neon-cyan' ? ' is-active' : ''}`}
+                    onClick={() => updateSubtitleStyle({ preset: 'neon-cyan' })}
+                  >
+                    <span className="color-dot dot-cyan" />
+                    <strong>Cyber Neon</strong>
+                    <small>Cyan Glow</small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`style-pill style-pill-red${subtitleStyle.preset === 'fire-red' ? ' is-active' : ''}`}
+                    onClick={() => updateSubtitleStyle({ preset: 'fire-red' })}
+                  >
+                    <span className="color-dot dot-red" />
+                    <strong>Bold Red</strong>
+                    <small>Kotak Merah</small>
+                  </button>
+                </div>
+
+                <div className="subtitle-custom-options">
+                  <div className="style-option-group">
+                    <label>Posisi Teks:</label>
+                    <div className="style-toggle-buttons">
+                      <button
+                        type="button"
+                        className={subtitleStyle.position === 'bottom' ? 'is-active' : ''}
+                        onClick={() => updateSubtitleStyle({ position: 'bottom' })}
+                      >
+                        Bawah
+                      </button>
+                      <button
+                        type="button"
+                        className={subtitleStyle.position === 'center' ? 'is-active' : ''}
+                        onClick={() => updateSubtitleStyle({ position: 'center' })}
+                      >
+                        Tengah
+                      </button>
+                      <button
+                        type="button"
+                        className={subtitleStyle.position === 'top' ? 'is-active' : ''}
+                        onClick={() => updateSubtitleStyle({ position: 'top' })}
+                      >
+                        Atas
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="style-option-group">
+                    <label>Ukuran Font:</label>
+                    <div className="style-toggle-buttons">
+                      <button
+                        type="button"
+                        className={subtitleStyle.size === 'normal' ? 'is-active' : ''}
+                        onClick={() => updateSubtitleStyle({ size: 'normal' })}
+                      >
+                        Sedang
+                      </button>
+                      <button
+                        type="button"
+                        className={subtitleStyle.size === 'large' ? 'is-active' : ''}
+                        onClick={() => updateSubtitleStyle({ size: 'large' })}
+                      >
+                        Besar
+                      </button>
+                      <button
+                        type="button"
+                        className={subtitleStyle.size === 'huge' ? 'is-active' : ''}
+                        onClick={() => updateSubtitleStyle({ size: 'huge' })}
+                      >
+                        Ekstra
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {error && <p className="error-message" role="alert">{error}</p>}
