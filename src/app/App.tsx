@@ -350,26 +350,6 @@ export const App: React.FC = () => {
 
         if (!data || !data.url) continue;
 
-        setYtStatus('Menghubungkan stream video ke editor…');
-        await new Promise<void>((resolve, reject) => {
-          const testVid = document.createElement('video');
-          testVid.crossOrigin = 'anonymous';
-          testVid.src = data.url;
-          const timer = setTimeout(() => {
-            testVid.src = '';
-            reject(new Error('Waktu muat stream habis.'));
-          }, 10000);
-          testVid.onloadedmetadata = () => {
-            clearTimeout(timer);
-            resolve();
-          };
-          testVid.onerror = () => {
-            clearTimeout(timer);
-            reject(new Error('Stream video tidak dapat dimuat.'));
-          };
-          testVid.load();
-        });
-
         const filename = data.filename || 'youtube_video.mp4';
         const virtualFile = new File([], filename, { type: 'video/mp4' });
 
