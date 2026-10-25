@@ -145,20 +145,6 @@ const CloseIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
 );
 
-const YoutubeIcon = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    <polygon points="10 15 15 12 10 9 10 15" fill="currentColor" />
-  </svg>
-);
-
-const LinkIcon = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-  </svg>
-);
-
 export const App: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -178,9 +164,6 @@ export const App: React.FC = () => {
   const [error, setError] = useState('');
   const [exportLabel, setExportLabel] = useState('Menyiapkan video…');
   const [previewState, setPreviewState] = useState<PreviewState>('idle');
-  const [ytUrl, setYtUrl] = useState('');
-  const [ytLoading, setYtLoading] = useState(false);
-  const [ytStatus, setYtStatus] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
@@ -300,122 +283,6 @@ export const App: React.FC = () => {
     setSubtitleStatus('');
   };
 
-  const handleYoutubeDownload = async () => {
-    const raw = ytUrl.trim();
-    if (!raw) return;
-
-    if (!/^https?:\/\//i.test(raw)) {
-      setError('Masukkan link yang valid (contoh: https://www.youtube.com/watch?v=... atau https://youtu.be/...).');
-      return;
-    }
-
-    setYtLoading(true);
-    setError('');
-    setYtStatus('Menghubungkan ke layanan downloader…');
-
-    // 1. Coba Local Runner terlebih dahulu jika dijalankan di laptop
-    try {
-      setYtStatus('Mengunduh video via koneksi laptop (yt-dlp)…');
-      const localResp = await fetch('/api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: raw })
-      });
-
-      if (localResp.ok) {
-        const localData = await localResp.json();
-        if (localData.status === 'ok' && localData.url) {
-          const virtualFile = new File([], localData.filename || 'youtube_video.mp4', { type: 'video/mp4' });
-          if (localData.size) Object.defineProperty(virtualFile, 'size', { value: localData.size });
-
-          if (sourceUrl && sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl);
-          setFile(virtualFile);
-          setSourceUrl(localData.url);
-          setDuration(localData.duration || 0);
-          setStart(0);
-          setClipDuration(30);
-          setProgress(0);
-          setExportState('idle');
-          setPreviewState('idle');
-          setError('');
-          setSubtitleCues([]);
-          setSubtitleStatus('');
-          setYtUrl('');
-          setYtLoading(false);
-          setYtStatus('');
-          return;
-        }
-      }
-    } catch {
-      // Tidak berjalan di local server, lanjut ke fallback cloud
-    }
-
-    const COBALT_INSTANCES = [
-      'https://rue-cobalt.xenon.zone',
-      'https://cobaltapi.cjs.nz'
-    ];
-
-    let lastError = '';
-
-    for (const inst of COBALT_INSTANCES) {
-      try {
-        setYtStatus(`Memproses link YouTube via ${new URL(inst).hostname}…`);
-
-        let data: any = null;
-        for (const quality of ['720', '480', '360']) {
-          const resp = await fetch(`${inst}/`, {
-            method: 'POST',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              url: raw,
-              videoQuality: quality,
-              alwaysProxy: true
-            })
-          });
-
-          if (resp.ok) {
-            const parsed = await resp.json();
-            if (parsed.status === 'tunnel' || parsed.status === 'stream') {
-              data = parsed;
-              break;
-            }
-          }
-        }
-
-        if (!data || !data.url) continue;
-
-        const filename = data.filename || 'youtube_video.mp4';
-        const virtualFile = new File([], filename, { type: 'video/mp4' });
-
-        if (sourceUrl && sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl);
-        setFile(virtualFile);
-        setSourceUrl(data.url);
-        setDuration(0);
-        setStart(0);
-        setClipDuration(30);
-        setProgress(0);
-        setExportState('idle');
-        setPreviewState('idle');
-        setError('');
-        setSubtitleCues([]);
-        setSubtitleStatus('');
-        setYtUrl('');
-        setYtLoading(false);
-        setYtStatus('');
-        return;
-      } catch (err: any) {
-        lastError = err?.message || 'Gagal memproses stream';
-      }
-    }
-
-    setYtLoading(false);
-    setYtStatus('');
-    setError(`Gagal memuat video: ${lastError || 'Layanan sedang sibuk'}. Pastikan video bersifat publik (tidak private/age-restricted) atau pilih file lokal.`);
-  };
-
   const updateStart = (value: number) => {
     const maxStart = Math.max(0, duration - 0.1);
     setStart(clamp(Number.isFinite(value) ? value : 0, 0, maxStart));
@@ -432,7 +299,6 @@ export const App: React.FC = () => {
 
   const recordSelectedAudio = async () => {
     const audioVideo = document.createElement('video');
-    audioVideo.crossOrigin = 'anonymous';
     audioVideo.src = sourceUrl;
     audioVideo.preload = 'auto';
     audioVideo.muted = true;
@@ -780,75 +646,20 @@ export const App: React.FC = () => {
         </section>
 
         {!file ? (
-          <div className="upload-container">
-            {/* YouTube Link Downloader Card */}
-            <section className="youtube-card" aria-label="Ambil video dari YouTube">
-              <div className="youtube-header">
-                <span className="youtube-badge">
-                  <YoutubeIcon /> {typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'Mode Laptop (Anti-Limit)' : 'YouTube Downloader'}
-                </span>
-                <h2>Masukkan link YouTube</h2>
-                <p>Tempel link video atau Shorts, video akan otomatis diunduh dan langsung siap dipotong.</p>
-              </div>
-              <form className="youtube-form" onSubmit={(e) => { e.preventDefault(); handleYoutubeDownload(); }}>
-                <div className="youtube-input-wrap">
-                  <span className="youtube-input-icon"><LinkIcon /></span>
-                  <input
-                    type="url"
-                    placeholder="https://www.youtube.com/watch?v=... atau https://youtu.be/..."
-                    value={ytUrl}
-                    onChange={(e) => setYtUrl(e.target.value)}
-                    disabled={ytLoading}
-                  />
-                  {ytUrl && !ytLoading && (
-                    <button
-                      type="button"
-                      className="youtube-clear-btn"
-                      onClick={() => setYtUrl('')}
-                      aria-label="Hapus link"
-                    >
-                      <CloseIcon />
-                    </button>
-                  )}
-                </div>
-                <button
-                  type="submit"
-                  className="button button-primary youtube-submit-btn"
-                  disabled={ytLoading || !ytUrl.trim()}
-                >
-                  {ytLoading ? 'Mengunduh…' : 'Ambil Video'}
-                </button>
-              </form>
-
-              {ytStatus && <p className="youtube-status-msg"><span className="status-dot" />{ytStatus}</p>}
-              {error && <p className="error-message" role="alert">{error}</p>}
-
-              {typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && (
-                <p className="local-tip">
-                  💡 <strong>Tip Semua Laptop:</strong> Agar download YouTube selalu cepat & bebas limit bot, Anda bisa menjalankan <code>python3 server.py</code> langsung di laptop Anda (Windows, Mac, Linux).
-                </p>
-              )}
-            </section>
-
-            <div className="or-divider">
-              <span>atau upload file lokal dari laptop</span>
-            </div>
-
-            <section
-              className={`upload-zone${dragging ? ' is-dragging' : ''}`}
-              onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(event) => { event.preventDefault(); setDragging(false); loadFile(event.dataTransfer.files[0]); }}
-              aria-labelledby="upload-title"
-            >
-              <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
-              <span className="upload-icon"><UploadIcon /></span>
-              <h2 id="upload-title">Pilih video dari file</h2>
-              <p>Tarik video ke sini, atau pilih file dari perangkat Anda.</p>
-              <button className="button button-secondary" type="button" onClick={() => inputRef.current?.click()}>Pilih file video</button>
-              <span className="file-support">Video diproses langsung di perangkat Anda</span>
-            </section>
-          </div>
+          <section
+            className={`upload-zone${dragging ? ' is-dragging' : ''}`}
+            onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => { event.preventDefault(); setDragging(false); loadFile(event.dataTransfer.files[0]); }}
+            aria-labelledby="upload-title"
+          >
+            <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
+            <span className="upload-icon"><UploadIcon /></span>
+            <h2 id="upload-title">Pilih video untuk dipotong</h2>
+            <p>Tarik video ke sini, atau pilih file dari perangkat Anda.</p>
+            <button className="button button-primary" type="button" onClick={() => inputRef.current?.click()}>Pilih video</button>
+            <span className="file-support">Video diproses di perangkat Anda</span>
+          </section>
         ) : (
           <section className="editor-card">
             <div className="section-head">
@@ -858,7 +669,7 @@ export const App: React.FC = () => {
             <div className="preview-panel">
               <div className="preview-grid">
                 <div><span className="preview-label">VIDEO ASLI</span><div className="video-frame">
-                <video ref={videoRef} src={sourceUrl} crossOrigin="anonymous" controls playsInline onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(event) => {
+                <video ref={videoRef} src={sourceUrl} controls playsInline onTimeUpdate={handleTimeUpdate} onLoadedMetadata={(event) => {
                   const nextDuration = event.currentTarget.duration;
                   setDuration(nextDuration);
                   setClipDuration(Math.min(30, nextDuration));
@@ -871,7 +682,7 @@ export const App: React.FC = () => {
               </div>
               <div className="file-row">
                 <div className="file-copy"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(1)} MB · Durasi {formatTime(duration)}</span></div>
-                <button className="button button-quiet" type="button" onClick={() => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); setFile(null); setSourceUrl(''); }}>Ganti video / Link lain</button>
+                <button className="button button-quiet" type="button" onClick={() => inputRef.current?.click()}>Ganti video</button>
                 <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
               </div>
             </div>
