@@ -75,9 +75,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .error-message { color: var(--danger); background: #f9ecea; }
 .success-message { color: var(--success); background: var(--accent-soft); }
 .subtitle-status { margin: 14px 0 0; color: var(--ink-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
-.subtitle-quick-bar { margin-top: 14px; display: flex; justify-content: center; }
-.subtitle-quick-bar .button-quiet { width: 100%; border-style: dashed; border-color: var(--line-strong); }
-.subtitle-quick-bar .button-quiet:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Subtitle Style Picker */
 .subtitle-style-card { margin-top: 16px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: #fafbfa; }

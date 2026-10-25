@@ -1329,17 +1329,6 @@ export const App: React.FC = () => {
               {exportState === 'exporting' && <div className="progress-wrap" aria-live="polite"><div className="progress-meta"><span>{exportLabel}</span><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><span style={{ transform: `scaleX(${progress / 100})` }} /></div></div>}
               {exportState === 'done' && <p className="success-message" role="status">Klip selesai dan sudah diunduh.</p>}
 
-              <div className="subtitle-quick-bar">
-                <button
-                  className="button button-quiet"
-                  type="button"
-                  onClick={() => transcribeSelectedClip()}
-                  disabled={!duration || exportState === 'exporting' || previewState === 'loading'}
-                >
-                  <ChatIcon /> {subtitleCues.length ? `Perbarui Subtitle (${subtitleCues.length} aktif)` : 'Buat Subtitle AI (Bebas API Key)'}
-                </button>
-              </div>
-
               <div className="actions">
                 {previewState === 'playing' ? (
                   <button className="button button-secondary" type="button" onClick={stopPreview}>Hentikan preview</button>
