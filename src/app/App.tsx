@@ -319,69 +319,60 @@ export const App: React.FC = () => {
       'https://cobalt.canine.tools'
     ];
 
-    let downloadUrl = '';
-    let filename = 'youtube_clip.mp4';
     let lastError = '';
 
     for (const inst of COBALT_INSTANCES) {
       try {
         setYtStatus(`Memproses link YouTube via ${new URL(inst).hostname}…`);
-        const resp = await fetch(`${inst}/`, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            url: raw,
-            videoQuality: '720',
-            downloadMode: 'auto'
-          })
-        });
 
-        if (!resp.ok) {
-          const errData = await resp.json().catch(() => null);
-          lastError = errData?.error?.code || `HTTP ${resp.status}`;
-          continue;
+        let data: any = null;
+        for (const quality of ['720', '480', '360']) {
+          const resp = await fetch(`${inst}/`, {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              url: raw,
+              videoQuality: quality,
+              alwaysProxy: true
+            })
+          });
+
+          if (resp.ok) {
+            const parsed = await resp.json();
+            if (parsed.status === 'tunnel' || parsed.status === 'stream' || parsed.status === 'redirect') {
+              data = parsed;
+              break;
+            }
+          }
         }
 
-        const data = await resp.json();
-        if (data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream') {
-          downloadUrl = data.url;
-          if (data.filename) filename = data.filename;
-          break;
-        } else if (data.status === 'error') {
-          lastError = data.error?.code || 'Gagal dari downloader';
+        if (!data || !data.url) continue;
+
+        setYtStatus(`Mengunduh stream video (${data.filename || 'HD'})…`);
+        const streamResp = await fetch(data.url);
+        if (!streamResp.ok) continue;
+
+        const blob = await streamResp.blob();
+        if (blob && blob.size > 0) {
+          const filename = data.filename || 'youtube_video.mp4';
+          const videoFile = new File([blob], filename, { type: blob.type || 'video/mp4' });
+          loadFile(videoFile);
+          setYtUrl('');
+          setYtLoading(false);
+          setYtStatus('');
+          return;
         }
       } catch (err: any) {
-        lastError = err?.message || 'Koneksi gagal';
+        lastError = err?.message || 'Gagal memproses stream';
       }
     }
 
-    if (!downloadUrl) {
-      setYtLoading(false);
-      setYtStatus('');
-      setError(`Gagal mengambil video (${lastError || 'Server sibuk'}). Pastikan link YouTube publik atau coba upload file langsung.`);
-      return;
-    }
-
-    try {
-      setYtStatus('Mengunduh video ke browser…');
-      const streamResp = await fetch(downloadUrl);
-      if (!streamResp.ok) throw new Error(`HTTP ${streamResp.status}`);
-
-      const blob = await streamResp.blob();
-      if (blob.size === 0) throw new Error('File video kosong.');
-
-      const videoFile = new File([blob], filename, { type: blob.type || 'video/mp4' });
-      loadFile(videoFile);
-      setYtUrl('');
-    } catch (err: any) {
-      setError(`Gagal memuat video: ${err?.message || 'Error jaringan'}. Coba gunakan file lokal.`);
-    } finally {
-      setYtLoading(false);
-      setYtStatus('');
-    }
+    setYtLoading(false);
+    setYtStatus('');
+    setError(`Gagal memuat video: ${lastError || 'Layanan sedang sibuk'}. Pastikan video bersifat publik (tidak private/age-restricted) atau pilih file lokal.`);
   };
 
   const updateStart = (value: number) => {
