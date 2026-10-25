@@ -21,7 +21,26 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .intro { margin: 0 0 28px; text-align: center; }
 .intro h1 { margin: 0; font-size: clamp(32px, 5vw, 44px); line-height: 1.1; letter-spacing: -.045em; font-weight: 720; }
 .intro p { margin: 10px 0 0; color: var(--ink-secondary); font-size: 16px; line-height: 1.6; }
-.upload-zone { min-height: 360px; border: 1px dashed var(--line-strong); border-radius: 16px; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px; text-align: center; transition: border-color .2s ease, background .2s ease; }
+.upload-container { display: flex; flex-direction: column; gap: 18px; }
+.youtube-card { border: 1px solid var(--line); border-radius: 16px; background: #fff; padding: 28px 28px 26px; box-shadow: 0 4px 20px rgba(28,34,29,.04); }
+.youtube-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px; background: #ff000014; color: #dc2626; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 12px; }
+.youtube-badge svg { width: 14px; height: 14px; }
+.youtube-header h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
+.youtube-header p { margin: 6px 0 20px; color: var(--ink-secondary); font-size: 14px; line-height: 1.5; }
+.youtube-form { display: flex; gap: 10px; align-items: center; }
+.youtube-input-wrap { flex: 1; position: relative; display: flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; height: 48px; transition: border-color .18s ease; }
+.youtube-input-wrap:focus-within { border-color: var(--focus); }
+.youtube-input-icon { display: grid; place-items: center; width: 44px; color: var(--ink-secondary); flex-shrink: 0; }
+.youtube-input-icon svg { width: 18px; height: 18px; }
+.youtube-input-wrap input { flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent; padding-right: 12px; color: var(--ink); font-size: 14px; }
+.youtube-clear-btn { background: transparent; border: none; width: 36px; height: 36px; display: grid; place-items: center; color: var(--ink-secondary); border-radius: 6px; margin-right: 6px; }
+.youtube-clear-btn:hover { color: var(--ink); }
+.youtube-submit-btn { height: 48px; white-space: nowrap; padding: 0 22px; flex-shrink: 0; }
+.youtube-status-msg { margin: 14px 0 0; color: var(--accent); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.or-divider { display: flex; align-items: center; text-align: center; color: var(--ink-secondary); font-size: 12px; font-weight: 600; letter-spacing: .04em; margin: 2px 0; }
+.or-divider::before, .or-divider::after { content: ''; flex: 1; border-bottom: 1px solid var(--line); }
+.or-divider span { padding: 0 14px; }
+.upload-zone { min-height: 240px; border: 1px dashed var(--line-strong); border-radius: 16px; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 36px 24px; text-align: center; transition: border-color .2s ease, background .2s ease; }
 .upload-zone.is-dragging { border-color: var(--accent); background: var(--accent-soft); }
 .upload-icon { width: 48px; height: 48px; display: grid; place-items: center; margin-bottom: 18px; border-radius: 12px; color: var(--accent); background: var(--accent-soft); }
 .upload-zone h2 { margin: 0; font-size: 22px; letter-spacing: -.025em; }
@@ -105,5 +124,5 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .settings-check-hint { grid-column: 1 / -1; margin: 0; color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
 .settings-actions { grid-column: 1 / -1; padding-top: 4px; display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; }
 @media (max-width: 680px) { .control-grid { grid-template-columns: 1fr; } .preview-grid { grid-template-columns: minmax(0, 1fr) 120px; } }
-@media (max-width: 520px) { .topbar { height: 60px; padding: 0 16px; } .workspace { width: min(100% - 24px, 900px); padding: 32px 0 48px; } .intro h1 { font-size: 32px; } .intro p { font-size: 15px; } .local-note { display: none; } .section-head, .preview-panel { padding-inline: 16px; } .control-panel { padding-inline: 16px; } .preview-grid { grid-template-columns: 1fr; } .tiktok-frame { width: min(62%, 220px); margin: 0 auto; } .file-row { align-items: flex-start; } .file-copy strong { max-width: 190px; } .actions { grid-template-columns: 1fr; } .clip-summary { align-items: flex-start; } .modal-backdrop { padding: 12px; align-items: start; } .settings-dialog { max-height: calc(100dvh - 24px); } .settings-header, .settings-form { padding-inline: 18px; } .settings-form { grid-template-columns: 1fr; } .settings-field-wide, .connection-message, .settings-actions { grid-column: 1; } .settings-actions { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .topbar { height: 60px; padding: 0 16px; } .workspace { width: min(100% - 24px, 900px); padding: 32px 0 48px; } .intro h1 { font-size: 32px; } .intro p { font-size: 15px; } .local-note { display: none; } .youtube-card { padding: 20px 16px; } .youtube-form { flex-direction: column; align-items: stretch; } .youtube-submit-btn { width: 100%; } .section-head, .preview-panel { padding-inline: 16px; } .control-panel { padding-inline: 16px; } .preview-grid { grid-template-columns: 1fr; } .tiktok-frame { width: min(62%, 220px); margin: 0 auto; } .file-row { align-items: flex-start; } .file-copy strong { max-width: 190px; } .actions { grid-template-columns: 1fr; } .clip-summary { align-items: flex-start; } .modal-backdrop { padding: 12px; align-items: start; } .settings-dialog { max-height: calc(100dvh - 24px); } .settings-header, .settings-form { padding-inline: 18px; } .settings-form { grid-template-columns: 1fr; } .settings-field-wide, .connection-message, .settings-actions { grid-column: 1; } .settings-actions { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

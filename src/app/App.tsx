@@ -145,6 +145,20 @@ const CloseIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
 );
 
+const YoutubeIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <polygon points="10 15 15 12 10 9 10 15" fill="currentColor" />
+  </svg>
+);
+
+const LinkIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </svg>
+);
+
 export const App: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -164,6 +178,9 @@ export const App: React.FC = () => {
   const [error, setError] = useState('');
   const [exportLabel, setExportLabel] = useState('Menyiapkan video…');
   const [previewState, setPreviewState] = useState<PreviewState>('idle');
+  const [ytUrl, setYtUrl] = useState('');
+  const [ytLoading, setYtLoading] = useState(false);
+  const [ytStatus, setYtStatus] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
@@ -281,6 +298,90 @@ export const App: React.FC = () => {
     setError('');
     setSubtitleCues([]);
     setSubtitleStatus('');
+  };
+
+  const handleYoutubeDownload = async () => {
+    const raw = ytUrl.trim();
+    if (!raw) return;
+
+    if (!/^https?:\/\//i.test(raw)) {
+      setError('Masukkan link yang valid (contoh: https://www.youtube.com/watch?v=... atau https://youtu.be/...).');
+      return;
+    }
+
+    setYtLoading(true);
+    setError('');
+    setYtStatus('Menghubungkan ke server downloader…');
+
+    const COBALT_INSTANCES = [
+      'https://rue-cobalt.xenon.zone',
+      'https://cobaltapi.cjs.nz',
+      'https://cobalt.canine.tools'
+    ];
+
+    let downloadUrl = '';
+    let filename = 'youtube_clip.mp4';
+    let lastError = '';
+
+    for (const inst of COBALT_INSTANCES) {
+      try {
+        setYtStatus(`Memproses link YouTube via ${new URL(inst).hostname}…`);
+        const resp = await fetch(`${inst}/`, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            url: raw,
+            videoQuality: '720',
+            downloadMode: 'auto'
+          })
+        });
+
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => null);
+          lastError = errData?.error?.code || `HTTP ${resp.status}`;
+          continue;
+        }
+
+        const data = await resp.json();
+        if (data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream') {
+          downloadUrl = data.url;
+          if (data.filename) filename = data.filename;
+          break;
+        } else if (data.status === 'error') {
+          lastError = data.error?.code || 'Gagal dari downloader';
+        }
+      } catch (err: any) {
+        lastError = err?.message || 'Koneksi gagal';
+      }
+    }
+
+    if (!downloadUrl) {
+      setYtLoading(false);
+      setYtStatus('');
+      setError(`Gagal mengambil video (${lastError || 'Server sibuk'}). Pastikan link YouTube publik atau coba upload file langsung.`);
+      return;
+    }
+
+    try {
+      setYtStatus('Mengunduh video ke browser…');
+      const streamResp = await fetch(downloadUrl);
+      if (!streamResp.ok) throw new Error(`HTTP ${streamResp.status}`);
+
+      const blob = await streamResp.blob();
+      if (blob.size === 0) throw new Error('File video kosong.');
+
+      const videoFile = new File([blob], filename, { type: blob.type || 'video/mp4' });
+      loadFile(videoFile);
+      setYtUrl('');
+    } catch (err: any) {
+      setError(`Gagal memuat video: ${err?.message || 'Error jaringan'}. Coba gunakan file lokal.`);
+    } finally {
+      setYtLoading(false);
+      setYtStatus('');
+    }
   };
 
   const updateStart = (value: number) => {
@@ -646,20 +747,67 @@ export const App: React.FC = () => {
         </section>
 
         {!file ? (
-          <section
-            className={`upload-zone${dragging ? ' is-dragging' : ''}`}
-            onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => { event.preventDefault(); setDragging(false); loadFile(event.dataTransfer.files[0]); }}
-            aria-labelledby="upload-title"
-          >
-            <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
-            <span className="upload-icon"><UploadIcon /></span>
-            <h2 id="upload-title">Pilih video untuk dipotong</h2>
-            <p>Tarik video ke sini, atau pilih file dari perangkat Anda.</p>
-            <button className="button button-primary" type="button" onClick={() => inputRef.current?.click()}>Pilih video</button>
-            <span className="file-support">Video diproses di perangkat Anda</span>
-          </section>
+          <div className="upload-container">
+            {/* YouTube Link Downloader Card */}
+            <section className="youtube-card" aria-label="Ambil video dari YouTube">
+              <div className="youtube-header">
+                <span className="youtube-badge"><YoutubeIcon /> YouTube Downloader</span>
+                <h2>Masukkan link YouTube</h2>
+                <p>Tempel link video atau Shorts, video akan otomatis diunduh dan langsung siap dipotong.</p>
+              </div>
+              <form className="youtube-form" onSubmit={(e) => { e.preventDefault(); handleYoutubeDownload(); }}>
+                <div className="youtube-input-wrap">
+                  <span className="youtube-input-icon"><LinkIcon /></span>
+                  <input
+                    type="url"
+                    placeholder="https://www.youtube.com/watch?v=... atau https://youtu.be/..."
+                    value={ytUrl}
+                    onChange={(e) => setYtUrl(e.target.value)}
+                    disabled={ytLoading}
+                  />
+                  {ytUrl && !ytLoading && (
+                    <button
+                      type="button"
+                      className="youtube-clear-btn"
+                      onClick={() => setYtUrl('')}
+                      aria-label="Hapus link"
+                    >
+                      <CloseIcon />
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  className="button button-primary youtube-submit-btn"
+                  disabled={ytLoading || !ytUrl.trim()}
+                >
+                  {ytLoading ? 'Mengunduh…' : 'Ambil Video'}
+                </button>
+              </form>
+
+              {ytStatus && <p className="youtube-status-msg"><span className="status-dot" />{ytStatus}</p>}
+              {error && <p className="error-message" role="alert">{error}</p>}
+            </section>
+
+            <div className="or-divider">
+              <span>atau upload file lokal dari laptop</span>
+            </div>
+
+            <section
+              className={`upload-zone${dragging ? ' is-dragging' : ''}`}
+              onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => { event.preventDefault(); setDragging(false); loadFile(event.dataTransfer.files[0]); }}
+              aria-labelledby="upload-title"
+            >
+              <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
+              <span className="upload-icon"><UploadIcon /></span>
+              <h2 id="upload-title">Pilih video dari file</h2>
+              <p>Tarik video ke sini, atau pilih file dari perangkat Anda.</p>
+              <button className="button button-secondary" type="button" onClick={() => inputRef.current?.click()}>Pilih file video</button>
+              <span className="file-support">Video diproses langsung di perangkat Anda</span>
+            </section>
+          </div>
         ) : (
           <section className="editor-card">
             <div className="section-head">
@@ -682,7 +830,7 @@ export const App: React.FC = () => {
               </div>
               <div className="file-row">
                 <div className="file-copy"><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(1)} MB · Durasi {formatTime(duration)}</span></div>
-                <button className="button button-quiet" type="button" onClick={() => inputRef.current?.click()}>Ganti video</button>
+                <button className="button button-quiet" type="button" onClick={() => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); setFile(null); setSourceUrl(''); }}>Ganti video / Link lain</button>
                 <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => loadFile(event.target.files?.[0])} />
               </div>
             </div>
