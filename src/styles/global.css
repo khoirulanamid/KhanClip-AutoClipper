@@ -37,6 +37,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .youtube-clear-btn:hover { color: var(--ink); }
 .youtube-submit-btn { height: 48px; white-space: nowrap; padding: 0 22px; flex-shrink: 0; }
 .youtube-status-msg { margin: 14px 0 0; color: var(--accent); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.local-tip { margin: 16px 0 0; padding: 10px 14px; border-radius: 8px; background: var(--surface-muted); color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
+.local-tip code { background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 4px; font-weight: 600; font-family: monospace; color: var(--ink); }
 .or-divider { display: flex; align-items: center; text-align: center; color: var(--ink-secondary); font-size: 12px; font-weight: 600; letter-spacing: .04em; margin: 2px 0; }
 .or-divider::before, .or-divider::after { content: ''; flex: 1; border-bottom: 1px solid var(--line); }
 .or-divider span { padding: 0 14px; }

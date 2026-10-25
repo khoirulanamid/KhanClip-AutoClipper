@@ -311,7 +311,44 @@ export const App: React.FC = () => {
 
     setYtLoading(true);
     setError('');
-    setYtStatus('Menghubungkan ke server downloader…');
+    setYtStatus('Menghubungkan ke layanan downloader…');
+
+    // 1. Coba Local Runner terlebih dahulu jika dijalankan di laptop
+    try {
+      setYtStatus('Mengunduh video via koneksi laptop (yt-dlp)…');
+      const localResp = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: raw })
+      });
+
+      if (localResp.ok) {
+        const localData = await localResp.json();
+        if (localData.status === 'ok' && localData.url) {
+          const virtualFile = new File([], localData.filename || 'youtube_video.mp4', { type: 'video/mp4' });
+          if (localData.size) Object.defineProperty(virtualFile, 'size', { value: localData.size });
+
+          if (sourceUrl && sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl);
+          setFile(virtualFile);
+          setSourceUrl(localData.url);
+          setDuration(localData.duration || 0);
+          setStart(0);
+          setClipDuration(30);
+          setProgress(0);
+          setExportState('idle');
+          setPreviewState('idle');
+          setError('');
+          setSubtitleCues([]);
+          setSubtitleStatus('');
+          setYtUrl('');
+          setYtLoading(false);
+          setYtStatus('');
+          return;
+        }
+      }
+    } catch {
+      // Tidak berjalan di local server, lanjut ke fallback cloud
+    }
 
     const COBALT_INSTANCES = [
       'https://rue-cobalt.xenon.zone',
@@ -747,7 +784,9 @@ export const App: React.FC = () => {
             {/* YouTube Link Downloader Card */}
             <section className="youtube-card" aria-label="Ambil video dari YouTube">
               <div className="youtube-header">
-                <span className="youtube-badge"><YoutubeIcon /> YouTube Downloader</span>
+                <span className="youtube-badge">
+                  <YoutubeIcon /> {typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'Mode Laptop (Anti-Limit)' : 'YouTube Downloader'}
+                </span>
                 <h2>Masukkan link YouTube</h2>
                 <p>Tempel link video atau Shorts, video akan otomatis diunduh dan langsung siap dipotong.</p>
               </div>
@@ -783,6 +822,12 @@ export const App: React.FC = () => {
 
               {ytStatus && <p className="youtube-status-msg"><span className="status-dot" />{ytStatus}</p>}
               {error && <p className="error-message" role="alert">{error}</p>}
+
+              {typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && (
+                <p className="local-tip">
+                  💡 <strong>Tip Semua Laptop:</strong> Agar download YouTube selalu cepat & bebas limit bot, Anda bisa menjalankan <code>python3 server.py</code> langsung di laptop Anda (Windows, Mac, Linux).
+                </p>
+              )}
             </section>
 
             <div className="or-divider">
